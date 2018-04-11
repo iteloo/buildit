@@ -1,5 +1,6 @@
 module View exposing (view)
 
+import Msg exposing (..)
 import Model exposing (..)
 import Block
     exposing
@@ -10,6 +11,15 @@ import Block
         )
 import Html exposing (..)
 import Html.Attributes exposing (..)
+import Html.Events
+    exposing
+        ( onClick
+        , on
+        , onMouseOver
+        , onMouseLeave
+        )
+import Json.Decode as Decode
+import Mouse
 import Dict
 
 
@@ -31,6 +41,29 @@ view model =
                 ]
             ]
             [ libView model ]
+        , case model.dragging of
+            Just { itemId, startPos, currentPos } ->
+                case Dict.get itemId model.defs of
+                    Nothing ->
+                        div [] []
+
+                    Just (Def lhs _) ->
+                        div
+                            [ style
+                                [ ( "position", "fixed" )
+                                , ( "top", toString currentPos.y ++ "px" )
+                                , ( "left", toString currentPos.x ++ "px" )
+                                , ( "box-shadow", "0 3px 6px rgba(0,0,0,0.24)" )
+                                , ( "willChange", "transform" )
+                                ]
+                            ]
+                            [ -- [note] the itemId is unnecessary,
+                              -- and may cause unexpected behaviour
+                              defView itemId lhs
+                            ]
+
+            Nothing ->
+                div [] []
         ]
 
 
@@ -40,12 +73,17 @@ editView =
 
 libView model =
     div [] <|
-        List.map (\(Def lhs rhs) -> defView lhs) <|
-            Dict.values model.defs
+        Dict.values <|
+            Dict.map
+                (\id (Def lhs _) -> defView id lhs)
+                model.defs
 
 
-defView (DefLhs typ ctnts) =
-    blockView "green" [] <|
+defView id (DefLhs typ ctnts) =
+    blockView "green"
+        [ onMouseDown (DragStart id)
+        ]
+    <|
         List.concat
             [ [ typeView "green" typ ]
             , List.map
@@ -66,17 +104,26 @@ defView (DefLhs typ ctnts) =
             ]
 
 
-exprView : Block.GetDef (Html msg) -> Expr -> Html msg
+exprView : Block.GetDef (Html Msg) -> Expr -> Html Msg
 exprView getDef e =
     case e of
         Var name ->
             -- [tofix] no type information passed
             blockView "grey" [] [ text name ]
 
+        Hole name ->
+            blockView "purple"
+                [ onMouseOver (MouseOver ("over " ++ toString name))
+                , onMouseLeave (MouseLeave ("leaving " ++ toString name))
+                ]
+                [ text name ]
+
         App f args ->
             getDef f
                 (\typ ctnts _ ->
-                    blockView "green" [] <|
+                    blockView "green"
+                        []
+                    <|
                         List.concat
                             [ [ typeView "green" typ ]
                             , List.reverse <|
@@ -139,3 +186,12 @@ typeView color typ =
             ]
         ]
         [ text typ ]
+
+
+
+-- HELPER
+
+
+onMouseDown : (Mouse.Position -> msg) -> Attribute msg
+onMouseDown msg =
+    on "mousedown" (Decode.map msg Mouse.position)

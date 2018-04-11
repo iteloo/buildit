@@ -8,14 +8,26 @@ import Block
         , Expr(..)
         )
 import Dict
+import Mouse
 
 
 type alias Model =
-    { defs : Dict.Dict Block.Id Def }
+    { dragging : Maybe Drag
+    , defs : Dict.Dict Block.Id Def
+    }
+
+
+type alias Drag =
+    { itemId : Block.Id
+    , startPos : Mouse.Position
+    , currentPos : Mouse.Position
+    }
 
 
 init =
-    { defs = defs }
+    { dragging = Nothing
+    , defs = defs
+    }
 
 
 

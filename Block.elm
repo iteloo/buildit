@@ -29,6 +29,7 @@ type alias Name =
 
 type Expr
     = Var Name
+    | Hole Name
     | App Id (List Expr)
     | Lit Int
 
@@ -45,16 +46,17 @@ intlit num =
 
 add23 : Expr
 add23 =
-    App
-        "add"
-        [ intlit 2
-        , intlit 3
-        ]
+    App "add" [ intlit 2, intlit 3 ]
+
+
+addHoles : Expr
+addHoles =
+    App "add" [ Hole "x", Hole "y" ]
 
 
 testExpr : Expr
 testExpr =
-    App "add" [ add23, Var "x" ]
+    App "add" [ add23, addHoles ]
 
 
 type DefLhs
@@ -77,6 +79,12 @@ type alias GetDef a =
 reduce : GetDef Expr -> Expr -> Expr
 reduce getDef expr =
     case expr of
+        Var name ->
+            Var name
+
+        Hole name ->
+            Hole name
+
         App f args ->
             getDef f
                 (\_ ctnts rhs ->
@@ -99,9 +107,6 @@ reduce getDef expr =
                         List.foldr (uncurry subst) rhs subs
                 )
 
-        Var name ->
-            Var name
-
         Lit lit ->
             Lit lit
 
@@ -114,6 +119,9 @@ subst var val expr =
                 val
             else
                 Var name
+
+        Hole name ->
+            Hole name
 
         App id exprs ->
             -- [tofix] capture
