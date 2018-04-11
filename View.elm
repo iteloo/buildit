@@ -15,7 +15,7 @@ import Html.Events
     exposing
         ( onClick
         , on
-        , onMouseOver
+        , onMouseEnter
         , onMouseLeave
         )
 import Json.Decode as Decode
@@ -34,7 +34,13 @@ view model =
                 [ ( "flex", "50%" )
                 ]
             ]
-            [ editView (mkGetDef model.defs) Block.testExpr ]
+          <|
+            case model.draftExpr of
+                Nothing ->
+                    []
+
+                Just draftExpr ->
+                    [ editView (mkGetDef model.defs) model.hover draftExpr ]
         , div
             [ style
                 [ ( "flex", "50%" )
@@ -55,6 +61,9 @@ view model =
                                 , ( "left", toString currentPos.x ++ "px" )
                                 , ( "box-shadow", "0 3px 6px rgba(0,0,0,0.24)" )
                                 , ( "willChange", "transform" )
+                                , -- [hack] needed otherwise hover events of
+                                  -- areas to be dropped into are caught
+                                  ( "pointer-events", "none" )
                                 ]
                             ]
                             [ -- [note] the itemId is unnecessary,
@@ -104,65 +113,92 @@ defView id (DefLhs typ ctnts) =
             ]
 
 
-exprView : Block.GetDef (Html Msg) -> Expr -> Html Msg
-exprView getDef e =
-    case e of
-        Var name ->
-            -- [tofix] no type information passed
-            blockView "grey" [] [ text name ]
+exprView :
+    Block.GetDef (Html Msg)
+    -> Maybe Block.Indices
+    -> Expr
+    -> Html Msg
+exprView getDef hoverIdxs =
+    let
+        go : Block.Indices -> Expr -> Html Msg
+        go idxs e =
+            case e of
+                Var name ->
+                    -- [tofix] no type information passed
+                    blockView "grey" [] [ text name ]
 
-        Hole name ->
-            blockView "purple"
-                [ onMouseOver (MouseOver ("over " ++ toString name))
-                , onMouseLeave (MouseLeave ("leaving " ++ toString name))
-                ]
-                [ text name ]
+                Hole name ->
+                    blockView "purple"
+                        (List.concat
+                            [ [ onMouseEnter (MouseOver idxs)
+                              , onMouseLeave (MouseLeave idxs)
+                              ]
+                            , case hoverIdxs of
+                                Nothing ->
+                                    []
 
-        App f args ->
-            getDef f
-                (\typ ctnts _ ->
-                    blockView "green"
-                        []
-                    <|
-                        List.concat
-                            [ [ typeView "green" typ ]
-                            , List.reverse <|
-                                Tuple.second <|
-                                    List.foldr
-                                        (\defContent ( args, content ) ->
-                                            (case defContent of
-                                                DefVar _ _ ->
-                                                    case args of
-                                                        arg :: ags ->
-                                                            ( ags
-                                                            , exprView getDef arg
-                                                                :: content
-                                                            )
-
-                                                        [] ->
-                                                            Debug.crash
-                                                                ("evaluation error."
-                                                                    ++ "Not enough arguments"
-                                                                )
-
-                                                DefText txt ->
-                                                    ( args
-                                                    , blockView "white" [] [ text txt ]
-                                                        :: content
-                                                    )
-                                            )
-                                        )
-                                        ( args, [] )
-                                        ctnts
+                                Just is ->
+                                    if is == idxs then
+                                        [ style
+                                            [ ( "background-color", "black" ) ]
+                                        ]
+                                    else
+                                        []
                             ]
-                )
+                        )
+                        [ text name ]
 
-        Lit lit ->
-            blockView "orange"
-                []
-                [ typeView "orange" Block.int
-                , blockView "white" [] [ text (toString lit) ]
-                ]
+                App f args ->
+                    getDef f
+                        (\typ ctnts _ ->
+                            blockView "green" [] <|
+                                List.concat
+                                    [ [ typeView "green" typ ]
+                                    , List.reverse <|
+                                        (\( _, a, _ ) -> a) <|
+                                            List.foldr
+                                                (\defContent ( args, content, idx ) ->
+                                                    (case defContent of
+                                                        DefVar _ _ ->
+                                                            case args of
+                                                                arg :: ags ->
+                                                                    ( ags
+                                                                    , go
+                                                                        (idxs ++ [ idx ])
+                                                                        arg
+                                                                        :: content
+                                                                    , idx + 1
+                                                                    )
+
+                                                                [] ->
+                                                                    Debug.crash
+                                                                        ("evaluation error."
+                                                                            ++ "Not enough arguments"
+                                                                        )
+
+                                                        DefText txt ->
+                                                            ( args
+                                                            , blockView "white"
+                                                                []
+                                                                [ text txt ]
+                                                                :: content
+                                                            , idx
+                                                            )
+                                                    )
+                                                )
+                                                ( args, [], 0 )
+                                                ctnts
+                                    ]
+                        )
+
+                Lit lit ->
+                    blockView "orange"
+                        []
+                        [ typeView "orange" Block.int
+                        , blockView "white" [] [ text (toString lit) ]
+                        ]
+    in
+        go []
 
 
 blockView color attrs =

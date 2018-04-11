@@ -6,6 +6,7 @@ module Update
 
 import Msg exposing (..)
 import Model exposing (..)
+import Block
 import Mouse
 
 
@@ -46,10 +47,30 @@ update msg model =
                 ! []
 
         DragEnd pos ->
-            { model | dragging = Nothing } ! []
+            { model
+                | dragging = Nothing
+                , draftExpr =
+                    Maybe.map
+                        (case Maybe.map2 ((,)) model.dragging model.hover of
+                            Nothing ->
+                                identity
 
-        MouseOver id ->
-            model ! Debug.log id []
+                            Just ( { itemId }, idxs ) ->
+                                mkGetDef model.defs
+                                    itemId
+                                    (\typ ctnts _ ->
+                                        Block.updateAt idxs
+                                            (Block.defLhsToExpr itemId
+                                                (Block.DefLhs typ ctnts)
+                                            )
+                                    )
+                        )
+                        model.draftExpr
+            }
+                ! []
 
-        MouseLeave id ->
-            model ! Debug.log id []
+        MouseOver idxs ->
+            { model | hover = Just idxs } ! Debug.log (toString idxs) []
+
+        MouseLeave idxs ->
+            { model | hover = Nothing } ! Debug.log ("l" ++ toString idxs) []

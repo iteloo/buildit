@@ -13,7 +13,9 @@ import Mouse
 
 type alias Model =
     { dragging : Maybe Drag
+    , hover : Maybe Block.Indices
     , defs : Dict.Dict Block.Id Def
+    , draftExpr : Maybe Expr
     }
 
 
@@ -26,7 +28,10 @@ type alias Drag =
 
 init =
     { dragging = Nothing
+    , hover = Nothing
     , defs = defs
+    , -- [tmp] hard-coded
+      draftExpr = Just Block.testExpr
     }
 
 
