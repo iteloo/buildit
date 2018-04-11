@@ -1,13 +1,18 @@
-module Block exposing (main)
+module Block
+    exposing
+        ( Expr(..)
+        , Id
+        , Def(..)
+        , DefLhs(..)
+        , DefContent(..)
+        , GetDef
+        , reduce
+        , testExpr
+        , int
+        , intlit
+        )
 
-import Html exposing (..)
-import Html.Attributes exposing (..)
-import Dict
 import Debug
-
-
-main =
-    view
 
 
 type alias Type =
@@ -65,38 +70,12 @@ type Def
     = Def DefLhs Expr
 
 
-addId =
-    "add"
+type alias GetDef a =
+    Id -> (Type -> List DefContent -> Expr -> a) -> a
 
 
-add =
-    Def
-        (DefLhs int
-            [ DefVar int "x"
-            , DefText "+"
-            , DefVar int "y"
-            ]
-        )
-        (Var "x")
-
-
-defs =
-    Dict.fromList
-        [ ( addId, add )
-        ]
-
-
-getDef id handler =
-    case Dict.get id defs of
-        Just (Def (DefLhs typ ctnts) rhs) ->
-            handler typ ctnts rhs
-
-        Nothing ->
-            Debug.crash ("No matching definition found for " ++ id)
-
-
-reduce : Expr -> Expr
-reduce expr =
+reduce : GetDef Expr -> Expr -> Expr
+reduce getDef expr =
     case expr of
         App f args ->
             getDef f
@@ -142,132 +121,3 @@ subst var val expr =
 
         Lit lit ->
             Lit lit
-
-
-view : Html msg
-view =
-    div
-        [ style
-            [ ( "display", "flex" )
-            ]
-        ]
-        [ div
-            [ style
-                [ ( "flex", "50%" )
-                ]
-            ]
-            [ editView testExpr ]
-        , div
-            [ style
-                [ ( "flex", "50%" )
-                ]
-            ]
-            [ libView ]
-        ]
-
-
-editView =
-    exprView
-
-
-libView =
-    div [] <|
-        List.map (\(Def lhs rhs) -> defView lhs) <|
-            Dict.values defs
-
-
-defView (DefLhs typ ctnts) =
-    blockView "green" [] <|
-        List.concat
-            [ [ typeView "green" typ ]
-            , List.map
-                (\defContent ->
-                    (case defContent of
-                        DefVar typ name ->
-                            blockView "grey"
-                                [ style [ ( "border-style", "dashed" ) ] ]
-                                [ typeView "grey" typ
-                                , text name
-                                ]
-
-                        DefText txt ->
-                            blockView "white" [] [ text txt ]
-                    )
-                )
-                ctnts
-            ]
-
-
-exprView : Expr -> Html msg
-exprView e =
-    case e of
-        Var name ->
-            -- [tofix] no type information passed
-            blockView "grey" [] [ text name ]
-
-        App f args ->
-            getDef f
-                (\typ ctnts _ ->
-                    blockView "green" [] <|
-                        List.concat
-                            [ [ typeView "green" typ ]
-                            , List.reverse <|
-                                Tuple.second <|
-                                    List.foldr
-                                        (\defContent ( args, content ) ->
-                                            (case defContent of
-                                                DefVar _ _ ->
-                                                    case args of
-                                                        arg :: ags ->
-                                                            ( ags
-                                                            , exprView arg
-                                                                :: content
-                                                            )
-
-                                                        [] ->
-                                                            Debug.crash
-                                                                ("evaluation error."
-                                                                    ++ "Not enough arguments"
-                                                                )
-
-                                                DefText txt ->
-                                                    ( args
-                                                    , blockView "white" [] [ text txt ]
-                                                        :: content
-                                                    )
-                                            )
-                                        )
-                                        ( args, [] )
-                                        ctnts
-                            ]
-                )
-
-        Lit lit ->
-            blockView "orange"
-                []
-                [ typeView "orange" int
-                , blockView "white" [] [ text (toString lit) ]
-                ]
-
-
-blockView color attrs =
-    div
-        ([ style
-            [ ( "margin", "10px" )
-            , ( "border", "2px solid " ++ color )
-            ]
-         ]
-            ++ attrs
-        )
-
-
-typeView color typ =
-    div
-        [ style
-            [ ( "display", "inline-block" )
-            , ( "vertical-align", "text-top" )
-            , ( "background-color", color )
-            , ( "font-size", "x-small" )
-            ]
-        ]
-        [ text typ ]
