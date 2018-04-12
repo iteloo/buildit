@@ -28,7 +28,7 @@ update msg model =
             { model
                 | dragging =
                     Just
-                        { itemId = id
+                        { itemId = Debug.log "drag-start: " id
                         , startPos = pos
                         , currentPos = pos
                         }
@@ -51,26 +51,46 @@ update msg model =
                 | dragging = Nothing
                 , draftExpr =
                     Maybe.map
-                        (case Maybe.map2 ((,)) model.dragging model.hover of
-                            Nothing ->
-                                identity
+                        (\e ->
+                            case Maybe.map2 ((,)) model.dragging model.hover of
+                                Nothing ->
+                                    e
 
-                            Just ( { itemId }, idxs ) ->
-                                mkGetDef model.defs
-                                    itemId
-                                    (\typ ctnts _ ->
-                                        Block.updateAt idxs
-                                            (Block.defLhsToExpr itemId
-                                                (Block.DefLhs typ ctnts)
-                                            )
-                                    )
+                                Just ( { itemId }, hoverIdxs ) ->
+                                    case itemId of
+                                        DraftItem dragIdxs ->
+                                            e
+                                                -- [note] must remove first!
+                                                |> Block.removeAt dragIdxs
+                                                |> (case Block.exprAt dragIdxs e of
+                                                        Just dragExpr ->
+                                                            Block.updateAt hoverIdxs dragExpr
+
+                                                        Nothing ->
+                                                            Debug.crash
+                                                                ("Cannot find expr at index: "
+                                                                    ++ toString dragIdxs
+                                                                )
+                                                   )
+
+                                        LibItem f ->
+                                            e
+                                                |> Block.updateAt hoverIdxs
+                                                    (mkGetDef model.defs
+                                                        f
+                                                        (\typ ctnts _ ->
+                                                            Block.defLhsToExpr f
+                                                                (Block.DefLhs typ ctnts)
+                                                        )
+                                                    )
                         )
                         model.draftExpr
             }
                 ! []
 
         MouseOver idxs ->
-            { model | hover = Just idxs } ! Debug.log (toString idxs) []
+            { model | hover = Just idxs }
+                ! Debug.log ("hover: " ++ toString idxs) []
 
         MouseLeave idxs ->
-            { model | hover = Nothing } ! Debug.log ("l" ++ toString idxs) []
+            { model | hover = Nothing } ! []

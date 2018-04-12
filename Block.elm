@@ -8,6 +8,8 @@ module Block
         , DefContent(..)
         , GetDef
         , defLhsToExpr
+        , exprAt
+        , removeAt
         , updateAt
         , reduce
         , testExpr
@@ -96,6 +98,62 @@ defLhsToExpr f (DefLhs typ ctnts) =
                         Nothing
             )
             ctnts
+
+
+exprAt : Indices -> Expr -> Maybe Expr
+exprAt indices =
+    let
+        go : Indices -> Expr -> Maybe Expr
+        go idxs e =
+            if idxs == indices then
+                Just e
+            else
+                case e of
+                    Var name ->
+                        Nothing
+
+                    Hole name ->
+                        Nothing
+
+                    App f args ->
+                        List.head <|
+                            List.filterMap identity <|
+                                List.indexedMap
+                                    (\idx -> go (idxs ++ [ idx ]))
+                                    args
+
+                    Lit lit ->
+                        Nothing
+    in
+        go []
+
+
+removeAt : Indices -> Expr -> Expr
+removeAt indices =
+    let
+        go : Indices -> Expr -> Expr
+        go idxs e =
+            if idxs == indices then
+                -- [tmp] bogus name
+                Hole "bogus"
+            else
+                case e of
+                    Var name ->
+                        Var name
+
+                    Hole name ->
+                        Hole name
+
+                    App f args ->
+                        App f <|
+                            List.indexedMap
+                                (\idx -> go (idxs ++ [ idx ]))
+                                args
+
+                    Lit lit ->
+                        Lit lit
+    in
+        go []
 
 
 updateAt : Indices -> Expr -> Expr -> Expr

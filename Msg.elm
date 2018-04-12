@@ -1,11 +1,12 @@
 module Msg exposing (..)
 
+import Model exposing (..)
 import Block
 import Mouse
 
 
 type Msg
-    = DragStart Block.Id Mouse.Position
+    = DragStart Item Mouse.Position
     | DragAt Mouse.Position
     | DragEnd Mouse.Position
     | MouseOver Block.Indices

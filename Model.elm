@@ -19,8 +19,13 @@ type alias Model =
     }
 
 
+type Item
+    = DraftItem Block.Indices
+    | LibItem Block.Id
+
+
 type alias Drag =
-    { itemId : Block.Id
+    { itemId : Item
     , startPos : Mouse.Position
     , currentPos : Mouse.Position
     }
