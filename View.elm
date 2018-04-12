@@ -23,38 +23,8 @@ view model =
             [ ( "display", "flex" )
             ]
         ]
-        [ div
-            [ style
-                [ ( "flex", "50%" )
-                ]
-            ]
-          <|
-            case model.draftExpr of
-                Nothing ->
-                    []
-
-                Just draftExpr ->
-                    [ editView (mkGetDef model.defs)
-                        model.hover
-                        (model.dragging
-                            |> Maybe.andThen
-                                (\{ itemId } ->
-                                    case itemId of
-                                        DraftItem idxs ->
-                                            Just idxs
-
-                                        LibItem _ ->
-                                            Nothing
-                                )
-                        )
-                        draftExpr
-                    ]
-        , div
-            [ style
-                [ ( "flex", "50%" )
-                ]
-            ]
-            [ libView model ]
+        [ editView model
+        , libView model
         , case model.dragging of
             Just { itemId, startPos, currentPos } ->
                 div
@@ -62,8 +32,7 @@ view model =
                         [ ( "position", "fixed" )
                         , ( "top", toString currentPos.y ++ "px" )
                         , ( "left", toString currentPos.x ++ "px" )
-                        , ( "box-shadow", "0 3px 6px rgba(0,0,0,0.24)" )
-                        , ( "willChange", "transform" )
+                        , ( "will-change", "transform" )
                         , -- [hack] needed otherwise hover events of
                           -- areas to be dropped into are caught
                           ( "pointer-events", "none" )
@@ -100,16 +69,56 @@ view model =
         ]
 
 
-editView =
-    exprView
+editView model =
+    div
+        [ style
+            [ ( "flex", "50%" )
+            , ( "padding", "20px" )
+            ]
+        ]
+    <|
+        case model.draftExpr of
+            Nothing ->
+                []
+
+            Just draftExpr ->
+                [ exprView (mkGetDef model.defs)
+                    model.hover
+                    (model.dragging
+                        |> Maybe.andThen
+                            (\{ itemId } ->
+                                case itemId of
+                                    DraftItem idxs ->
+                                        Just idxs
+
+                                    LibItem _ ->
+                                        Nothing
+                            )
+                    )
+                    draftExpr
+                ]
 
 
 libView model =
-    div [] <|
-        Dict.values <|
-            Dict.map
-                (\id (Def lhs _) -> defView id lhs)
-                model.defs
+    div
+        [ style
+            [ ( "flex", "50%" )
+            , ( "padding", "20px" )
+            ]
+        ]
+        [ h3
+            [ style
+                [ ( "text-align", "center" )
+                , ( "user-select", "none" )
+                ]
+            ]
+            [ text "Library Blocks" ]
+        , div [] <|
+            Dict.values <|
+                Dict.map
+                    (\id (Def lhs _) -> defView id lhs)
+                    model.defs
+        ]
 
 
 defView id (DefLhs typ ctnts) =
@@ -117,9 +126,9 @@ defView id (DefLhs typ ctnts) =
         [ onMouseDown (DragStart (LibItem id))
         ]
     <|
-        List.concat
-            [ [ typeView "green" typ ]
-            , List.map
+        [ typeView "green" typ
+        , div [ style [ ( "padding", "20px" ) ] ] <|
+            List.map
                 (\defContent ->
                     (case defContent of
                         DefVar typ name ->
@@ -134,7 +143,7 @@ defView id (DefLhs typ ctnts) =
                     )
                 )
                 ctnts
-            ]
+        ]
 
 
 exprView :
@@ -155,13 +164,24 @@ exprView getDef hoverIdxs dragIdxs =
                     [ onMouseEnter (MouseOver idxs)
                     , onMouseLeave (MouseLeave idxs)
                     ]
+
+                hoverHighlight =
+                    case Maybe.map ((==) idxs) hoverIdxs of
+                        Just True ->
+                            [ style
+                                [ ( "box-shadow", "0px 0px 20px grey" )
+                                ]
+                            ]
+
+                        _ ->
+                            []
             in
                 case Maybe.map ((==) idxs) dragIdxs of
                     Just True ->
-                        blockView "black"
+                        div
                             (List.concat
                                 [ [ style
-                                        [ ( "width", "50px" )
+                                        [ ( "width", "100%" )
                                         , ( "height", "50px" )
                                         ]
                                   ]
@@ -174,27 +194,29 @@ exprView getDef hoverIdxs dragIdxs =
                         case e of
                             Var name ->
                                 -- [tofix] no type information passed
-                                blockView "grey" [ dragStart ] [ text name ]
+                                blockView "grey"
+                                    (List.concat
+                                        [ [ dragStart ], hoverHighlight ]
+                                    )
+                                    [ text name ]
 
                             Hole name ->
-                                blockView "purple"
+                                blockView "grey"
                                     (List.concat
-                                        [ List.concat
-                                            [ [ dragStart
-                                              ]
-                                            , hover
-                                            ]
-                                        , case hoverIdxs of
-                                            Nothing ->
-                                                []
-
-                                            Just is ->
-                                                if is == idxs then
-                                                    [ style
-                                                        [ ( "background-color", "black" ) ]
+                                        [ [ onMouseDown (always HoleMouseDown)
+                                          ]
+                                        , hoverHighlight
+                                        , hover
+                                        , [ style [ ( "border-style", "dashed" ) ] ]
+                                        , case Maybe.map ((==) idxs) hoverIdxs of
+                                            Just True ->
+                                                [ style
+                                                    [ ( "background-color", "lightgrey" )
                                                     ]
-                                                else
-                                                    []
+                                                ]
+
+                                            _ ->
+                                                []
                                         ]
                                     )
                                     [ text name ]
@@ -202,10 +224,20 @@ exprView getDef hoverIdxs dragIdxs =
                             App f args ->
                                 getDef f
                                     (\typ ctnts _ ->
-                                        blockView "green" [ dragStart ] <|
-                                            List.concat
-                                                [ [ typeView "green" typ ]
-                                                , List.reverse <|
+                                        blockView "green"
+                                            (List.concat
+                                                [ [ dragStart
+                                                  ]
+                                                , hoverHighlight
+                                                ]
+                                            )
+                                        <|
+                                            [ typeView "green" typ
+                                            , div
+                                                [ style [ ( "padding", "20px" ) ]
+                                                ]
+                                              <|
+                                                List.reverse <|
                                                     (\( _, a, _ ) -> a) <|
                                                         List.foldr
                                                             (\defContent ( args, content, idx ) ->
@@ -214,9 +246,12 @@ exprView getDef hoverIdxs dragIdxs =
                                                                         case args of
                                                                             arg :: ags ->
                                                                                 ( ags
-                                                                                , go
-                                                                                    (idxs ++ [ idx ])
-                                                                                    arg
+                                                                                , holeView "green"
+                                                                                    []
+                                                                                    [ go
+                                                                                        (idxs ++ [ idx ])
+                                                                                        arg
+                                                                                    ]
                                                                                     :: content
                                                                                 , idx + 1
                                                                                 )
@@ -239,12 +274,17 @@ exprView getDef hoverIdxs dragIdxs =
                                                             )
                                                             ( args, [], 0 )
                                                             ctnts
-                                                ]
+                                            ]
                                     )
 
                             Lit lit ->
                                 blockView "orange"
-                                    [ dragStart ]
+                                    (List.concat
+                                        [ [ dragStart
+                                          ]
+                                        , hoverHighlight
+                                        ]
+                                    )
                                     [ typeView "orange" Block.int
                                     , blockView "white" [] [ text (toString lit) ]
                                     ]
@@ -252,11 +292,30 @@ exprView getDef hoverIdxs dragIdxs =
         go []
 
 
+holeView color attrs =
+    div
+        ([ style
+            [ ( "padding", "1px" )
+            , ( "border", "2px solid " ++ color )
+            , ( "border-radius", "10px" )
+            , ( "box-shadow", "inset 0px 0px 10px " ++ color )
+            , ( "background-color", "white" )
+            , ( "overflow", "hidden" )
+            , ( "user-select", "none" )
+            ]
+         ]
+            ++ attrs
+        )
+
+
 blockView color attrs =
     div
         ([ style
-            [ ( "margin", "10px" )
-            , ( "border", "2px solid " ++ color )
+            [ ( "border", "2px solid " ++ color )
+            , ( "border-radius", "10px" )
+            , ( "box-shadow", "inset 0px 0px 5px " ++ color )
+            , ( "background-color", "white" )
+            , ( "overflow", "hidden" )
             , ( "user-select", "none" )
             ]
          ]

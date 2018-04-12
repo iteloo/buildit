@@ -7,6 +7,7 @@ import Mouse
 
 type Msg
     = DragStart Item Mouse.Position
+    | HoleMouseDown
     | DragAt Mouse.Position
     | DragEnd Mouse.Position
     | MouseOver Block.Indices

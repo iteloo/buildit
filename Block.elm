@@ -92,7 +92,7 @@ defLhsToExpr f (DefLhs typ ctnts) =
             (\c ->
                 case c of
                     DefVar _ name ->
-                        Just (Var name)
+                        Just (Hole name)
 
                     DefText _ ->
                         Nothing

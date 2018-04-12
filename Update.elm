@@ -35,6 +35,10 @@ update msg model =
             }
                 ! []
 
+        -- [hack] needed to intercept parents mousedown event
+        HoleMouseDown ->
+            model ! []
+
         DragAt pos ->
             { model
                 | dragging =
