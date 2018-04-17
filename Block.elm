@@ -103,32 +103,111 @@ defLhsToExpr f (DefLhs typ ctnts) =
             ctnts
 
 
+foldr :
+    (Name -> s)
+    -> (Name -> s)
+    -> (Id -> List s -> s)
+    -> (Int -> s)
+    -> Expr
+    -> s
+foldr var hole app lit e =
+    case e of
+        Var name ->
+            var name
+
+        Hole name ->
+            hole name
+
+        App f args ->
+            app f (List.map (foldr var hole app lit) args)
+
+        Lit x ->
+            lit x
+
+
+indexedFoldr :
+    (Indices -> Name -> s)
+    -> (Indices -> Name -> s)
+    -> (Indices -> Id -> List s -> s)
+    -> (Indices -> Int -> s)
+    -> Expr
+    -> s
+indexedFoldr var hole app lit =
+    flip
+        (foldr
+            (flip var)
+            (flip hole)
+            (\f args idxs ->
+                app idxs
+                    f
+                    (List.indexedMap
+                        (\idx -> (|>) (idxs ++ [ idx ]))
+                        args
+                    )
+            )
+            (flip lit)
+        )
+        []
+
+
 exprAt : Indices -> Expr -> Maybe Expr
-exprAt indices =
+exprAt =
     let
-        go : Indices -> Expr -> Maybe Expr
-        go idxs e =
-            if idxs == indices then
-                Just e
-            else
-                case e of
-                    Var name ->
-                        Nothing
+        end v left =
+            case left of
+                [] ->
+                    Just v
 
-                    Hole name ->
-                        Nothing
-
-                    App f args ->
-                        List.head <|
-                            List.filterMap identity <|
-                                List.indexedMap
-                                    (\idx -> go (idxs ++ [ idx ]))
-                                    args
-
-                    Lit lit ->
-                        Nothing
+                _ ->
+                    Nothing
     in
-        go []
+        flip
+            (foldr
+                (end << Var)
+                (end << Hole)
+                (\f args left ->
+                    case left of
+                        [] ->
+                            Maybe.map (App f) <|
+                                sequenceMaybes (List.map ((|>) []) args)
+
+                        idx :: idxs ->
+                            args
+                                |> List.map ((|>) idxs)
+                                |> List.drop idx
+                                |> List.head
+                                |> Maybe.andThen identity
+                )
+                (end << Lit)
+            )
+
+
+
+-- exprAt indices =
+--     let
+--         go : Indices -> Expr -> Maybe Expr
+--         go idxs e =
+--             if idxs == indices then
+--                 Just e
+--             else
+--                 case e of
+--                     Var name ->
+--                         Nothing
+--
+--                     Hole name ->
+--                         Nothing
+--
+--                     App f args ->
+--                         List.head <|
+--                             List.filterMap identity <|
+--                                 List.indexedMap
+--                                     (\idx -> go (idxs ++ [ idx ]))
+--                                     args
+--
+--                     Lit lit ->
+--                         Nothing
+--     in
+--         go []
 
 
 setAt : Indices -> Expr -> Expr -> Expr
@@ -309,3 +388,8 @@ subst var val expr =
 
         Lit lit ->
             Lit lit
+
+
+sequenceMaybes : List (Maybe a) -> Maybe (List a)
+sequenceMaybes =
+    List.foldr (Maybe.map2 (::)) (Just [])
