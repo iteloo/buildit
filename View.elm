@@ -207,7 +207,11 @@ exprView getDef hoverIdxs dragIdxs =
                                           ]
                                         , hoverHighlight
                                         , hover
-                                        , [ style [ ( "border-style", "dashed" ) ] ]
+                                        , [ style
+                                                [ ( "border-style", "dashed" )
+                                                , ( "height", "100%" )
+                                                ]
+                                          ]
                                         , case Maybe.map ((==) idxs) hoverIdxs of
                                             Just True ->
                                                 [ style
@@ -232,7 +236,9 @@ exprView getDef hoverIdxs dragIdxs =
                                                 ]
                                             )
                                         <|
-                                            [ typeView "green" typ
+                                            [ div
+                                                [ onClick (Reduce idxs) ]
+                                                [ typeView "green" typ ]
                                             , div
                                                 [ style [ ( "padding", "20px" ) ]
                                                 ]
@@ -298,7 +304,7 @@ holeView color attrs =
             [ ( "padding", "1px" )
             , ( "border", "2px solid " ++ color )
             , ( "border-radius", "10px" )
-            , ( "box-shadow", "inset 0px 0px 10px " ++ color )
+            , ( "box-shadow", "inset 0px 0px 20px " ++ color )
             , ( "background-color", "white" )
             , ( "overflow", "hidden" )
             , ( "user-select", "none" )

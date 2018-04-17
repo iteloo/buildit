@@ -22,6 +22,7 @@ subscriptions model =
                 ]
 
 
+update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
         DragStart id pos ->
@@ -68,7 +69,7 @@ update msg model =
                                                 |> Block.removeAt dragIdxs
                                                 |> (case Block.exprAt dragIdxs e of
                                                         Just dragExpr ->
-                                                            Block.updateAt hoverIdxs dragExpr
+                                                            Block.setAt hoverIdxs dragExpr
 
                                                         Nothing ->
                                                             Debug.crash
@@ -79,7 +80,7 @@ update msg model =
 
                                         LibItem f ->
                                             e
-                                                |> Block.updateAt hoverIdxs
+                                                |> Block.setAt hoverIdxs
                                                     (mkGetDef model.defs
                                                         f
                                                         (\typ ctnts _ ->
@@ -98,3 +99,14 @@ update msg model =
 
         MouseLeave idxs ->
             { model | hover = Nothing } ! []
+
+        Reduce idxs ->
+            { model
+                | draftExpr =
+                    Maybe.map
+                        (Block.updateAt idxs
+                            (Block.reduceCallByValue (mkGetDef model.defs))
+                        )
+                        model.draftExpr
+            }
+                ! []

@@ -12,3 +12,4 @@ type Msg
     | DragEnd Mouse.Position
     | MouseOver Block.Indices
     | MouseLeave Block.Indices
+    | Reduce Block.Indices

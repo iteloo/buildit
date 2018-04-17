@@ -9,9 +9,12 @@ module Block
         , GetDef
         , defLhsToExpr
         , exprAt
+        , setAt
         , removeAt
         , updateAt
-        , reduce
+        , stepCallByName
+        , stepCallByValue
+        , reduceCallByValue
         , testExpr
         , int
         , intlit
@@ -128,36 +131,8 @@ exprAt indices =
         go []
 
 
-removeAt : Indices -> Expr -> Expr
-removeAt indices =
-    let
-        go : Indices -> Expr -> Expr
-        go idxs e =
-            if idxs == indices then
-                -- [tmp] bogus name
-                Hole "bogus"
-            else
-                case e of
-                    Var name ->
-                        Var name
-
-                    Hole name ->
-                        Hole name
-
-                    App f args ->
-                        App f <|
-                            List.indexedMap
-                                (\idx -> go (idxs ++ [ idx ]))
-                                args
-
-                    Lit lit ->
-                        Lit lit
-    in
-        go []
-
-
-updateAt : Indices -> Expr -> Expr -> Expr
-updateAt indices val =
+setAt : Indices -> Expr -> Expr -> Expr
+setAt indices val =
     let
         go : Indices -> Expr -> Expr
         go idxs e =
@@ -183,8 +158,24 @@ updateAt indices val =
         go []
 
 
-reduce : GetDef Expr -> Expr -> Expr
-reduce getDef expr =
+removeAt : Indices -> Expr -> Expr
+removeAt indices =
+    -- [tmp] bogus name
+    setAt indices (Hole "bogus")
+
+
+updateAt : Indices -> (Expr -> Expr) -> Expr -> Expr
+updateAt indices upd expr =
+    case exprAt indices expr of
+        Just e ->
+            setAt indices (upd e) expr
+
+        Nothing ->
+            expr
+
+
+stepCallByName : GetDef Expr -> Expr -> Expr
+stepCallByName getDef expr =
     case expr of
         Var name ->
             Var name
@@ -193,29 +184,111 @@ reduce getDef expr =
             Hole name
 
         App f args ->
-            getDef f
-                (\_ ctnts rhs ->
-                    let
-                        vars =
-                            List.filterMap
-                                (\e ->
-                                    case e of
-                                        DefVar _ name ->
-                                            Just name
+            -- [hack] pick out basic operations
+            if f == "add" then
+                case args of
+                    [ Lit x, Lit y ] ->
+                        Lit (x + y)
 
-                                        _ ->
-                                            Nothing
-                                )
-                                ctnts
+                    _ ->
+                        App f args
+            else
+                getDef f
+                    (\_ ctnts rhs ->
+                        let
+                            vars =
+                                List.filterMap
+                                    (\e ->
+                                        case e of
+                                            DefVar _ name ->
+                                                Just name
 
-                        subs =
-                            List.map2 ((,)) vars args
-                    in
-                        List.foldr (uncurry subst) rhs subs
-                )
+                                            _ ->
+                                                Nothing
+                                    )
+                                    ctnts
+
+                            subs =
+                                List.map2 ((,)) vars args
+                        in
+                            List.foldr (uncurry subst) rhs subs
+                    )
 
         Lit lit ->
             Lit lit
+
+
+reduceCallByValue getDef expr =
+    let
+        result =
+            stepCallByValue getDef expr
+    in
+        if result == expr then
+            result
+        else
+            stepCallByValue getDef result
+
+
+stepCallByValue : GetDef Expr -> Expr -> Expr
+stepCallByValue getDef expr =
+    let
+        go : Expr -> ( Bool, Expr )
+        go expr =
+            case expr of
+                Var name ->
+                    ( False, Var name )
+
+                Hole name ->
+                    ( False, Hole name )
+
+                App f args ->
+                    let
+                        ( didStep, args_ ) =
+                            List.map go args
+                                |> (\xs ->
+                                        ( List.any Tuple.first xs
+                                        , List.map Tuple.second xs
+                                        )
+                                   )
+                    in
+                        if didStep then
+                            ( True, App f args_ )
+                        else if f == "add" then
+                            -- [hack] pick out basic operations
+                            case args of
+                                [ Lit x, Lit y ] ->
+                                    ( True, Lit (x + y) )
+
+                                _ ->
+                                    ( False, App f args )
+                        else
+                            ( True
+                            , getDef f
+                                (\_ ctnts rhs ->
+                                    let
+                                        vars =
+                                            List.filterMap
+                                                (\e ->
+                                                    case e of
+                                                        DefVar _ name ->
+                                                            Just name
+
+                                                        _ ->
+                                                            Nothing
+                                                )
+                                                ctnts
+
+                                        subs =
+                                            List.map2 ((,)) vars args
+                                    in
+                                        List.foldr (uncurry subst) rhs subs
+                                )
+                            )
+
+                Lit lit ->
+                    ( False, Lit lit )
+    in
+        Tuple.second <| go expr
 
 
 subst : Name -> Expr -> Expr -> Expr
