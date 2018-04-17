@@ -26,6 +26,7 @@ type Item
 
 type alias Drag =
     { itemId : Item
+    , confirmed : Bool
     , startPos : Mouse.Position
     , currentPos : Mouse.Position
     }

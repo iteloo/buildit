@@ -26,43 +26,46 @@ view model =
         [ editView model
         , libView model
         , case model.dragging of
-            Just { itemId, startPos, currentPos } ->
-                div
-                    [ style
-                        [ ( "position", "fixed" )
-                        , ( "top", toString currentPos.y ++ "px" )
-                        , ( "left", toString currentPos.x ++ "px" )
-                        , ( "will-change", "transform" )
-                        , -- [hack] needed otherwise hover events of
-                          -- areas to be dropped into are caught
-                          ( "pointer-events", "none" )
+            Just { itemId, confirmed, startPos, currentPos } ->
+                if confirmed then
+                    div
+                        [ style
+                            [ ( "position", "fixed" )
+                            , ( "top", toString currentPos.y ++ "px" )
+                            , ( "left", toString currentPos.x ++ "px" )
+                            , ( "will-change", "transform" )
+                            , -- [hack] needed otherwise hover events of
+                              -- areas to be dropped into are caught
+                              ( "pointer-events", "none" )
+                            ]
                         ]
-                    ]
-                    [ case itemId of
-                        DraftItem idxs ->
-                            case
-                                model.draftExpr
-                                    |> Maybe.andThen (Block.exprAt idxs)
-                            of
-                                Just e ->
-                                    exprView (mkGetDef model.defs)
-                                        model.hover
-                                        Nothing
-                                        e
+                        [ case itemId of
+                            DraftItem idxs ->
+                                case
+                                    model.draftExpr
+                                        |> Maybe.andThen (Block.exprAt idxs)
+                                of
+                                    Just e ->
+                                        exprView (mkGetDef model.defs)
+                                            model.hover
+                                            Nothing
+                                            e
 
-                                Nothing ->
-                                    div [] []
+                                    Nothing ->
+                                        div [] []
 
-                        LibItem id ->
-                            case Dict.get id model.defs of
-                                Nothing ->
-                                    div [] []
+                            LibItem id ->
+                                case Dict.get id model.defs of
+                                    Nothing ->
+                                        div [] []
 
-                                Just (Def lhs _) ->
-                                    -- [note] the itemId is unnecessary,
-                                    -- and may cause unexpected behaviour
-                                    defView id lhs
-                    ]
+                                    Just (Def lhs _) ->
+                                        -- [note] the itemId is unnecessary,
+                                        -- and may cause unexpected behaviour
+                                        defView id lhs
+                        ]
+                else
+                    div [] []
 
             Nothing ->
                 div [] []
@@ -86,13 +89,16 @@ editView model =
                     model.hover
                     (model.dragging
                         |> Maybe.andThen
-                            (\{ itemId } ->
-                                case itemId of
-                                    DraftItem idxs ->
-                                        Just idxs
+                            (\{ itemId, confirmed } ->
+                                if confirmed then
+                                    case itemId of
+                                        DraftItem idxs ->
+                                            Just idxs
 
-                                    LibItem _ ->
-                                        Nothing
+                                        LibItem _ ->
+                                            Nothing
+                                else
+                                    Nothing
                             )
                     )
                     draftExpr
@@ -236,9 +242,9 @@ exprView getDef hoverIdxs dragIdxs =
                                                 ]
                                             )
                                         <|
-                                            [ div
-                                                [ onClick (Reduce idxs) ]
-                                                [ typeView "green" typ ]
+                                            [ typeView "green" typ
+                                            , button [ onClick (Reduce idxs) ]
+                                                [ text "Evaluate" ]
                                             , div
                                                 [ style [ ( "padding", "20px" ) ]
                                                 ]

@@ -30,6 +30,7 @@ update msg model =
                 | dragging =
                     Just
                         { itemId = Debug.log "drag-start: " id
+                        , confirmed = False
                         , startPos = pos
                         , currentPos = pos
                         }
@@ -41,15 +42,29 @@ update msg model =
             model ! []
 
         DragAt pos ->
-            { model
-                | dragging =
-                    Maybe.map
-                        (\d ->
-                            { d | currentPos = pos }
-                        )
-                        model.dragging
-            }
-                ! []
+            let
+                dist pos1 pos2 =
+                    (abs (pos1.x - pos2.x)) ^ 2 + (abs (pos1.y - pos2.y)) ^ 2
+
+                -- [q] in pixels?
+                threshold =
+                    10
+            in
+                { model
+                    | dragging =
+                        Maybe.map
+                            (\d ->
+                                { d
+                                    | confirmed =
+                                        d.confirmed
+                                            || dist d.currentPos d.startPos
+                                            > threshold
+                                    , currentPos = pos
+                                }
+                            )
+                            model.dragging
+                }
+                    ! []
 
         DragEnd pos ->
             { model
