@@ -105,6 +105,9 @@ editView model =
                             )
                     )
                     draftExpr
+                , playbackView (mkGetDef model.defs)
+                    (mkGetDef model.defs)
+                    draftExpr
                 ]
 
 
@@ -379,8 +382,42 @@ typeView color typ =
         [ text typ ]
 
 
+playbackView getDefHtml getDefExpr expr =
+    div [] <|
+        -- [hack] stealing dynamic view for now
+        List.map (exprView getDefHtml Nothing Nothing)
+        <|
+            generate
+                (\e ->
+                    let
+                        result =
+                            Block.stepCallByValue getDefExpr e
+                    in
+                        if result == e then
+                            Nothing
+                        else
+                            Just result
+                )
+                expr
+
+
 
 -- HELPER
+
+
+generate : (a -> Maybe a) -> a -> List a
+generate gen =
+    let
+        go : List a -> a -> List a
+        go xs x =
+            case gen x of
+                Nothing ->
+                    x :: xs
+
+                Just next ->
+                    go (x :: xs) next
+    in
+        go []
 
 
 onMouseDown : (Mouse.Position -> msg) -> Attribute msg

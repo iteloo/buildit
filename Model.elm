@@ -33,6 +33,12 @@ type alias Drag =
     }
 
 
+type alias EvalFrame =
+    { selection : Block.Indices
+    , expr : Expr
+    }
+
+
 init =
     { dragging = Nothing
     , hover = Nothing
