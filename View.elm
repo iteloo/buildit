@@ -9,12 +9,14 @@ import Block
         , DefContent(..)
         , Expr(..)
         )
+import Helper
 import Html exposing (..)
 import Html.Attributes exposing (..)
 import Html.Events exposing (..)
 import Json.Decode as Decode
 import Mouse
 import Dict
+import List.Zipper as Zipper exposing (Zipper)
 
 
 view model =
@@ -88,26 +90,28 @@ editView model =
                 []
 
             Just draftExpr ->
-                [ exprView (mkGetDef model.defs)
-                    model.hover
-                    (model.dragging
-                        |> Maybe.andThen
-                            (\{ itemId, confirmed } ->
-                                if confirmed then
-                                    case itemId of
-                                        DraftItem idxs ->
-                                            Just idxs
+                [ case model.eval of
+                    Nothing ->
+                        exprView (mkGetDef model.defs)
+                            model.hover
+                            (model.dragging
+                                |> Maybe.andThen
+                                    (\{ itemId, confirmed } ->
+                                        if confirmed then
+                                            case itemId of
+                                                DraftItem idxs ->
+                                                    Just idxs
 
-                                        _ ->
+                                                _ ->
+                                                    Nothing
+                                        else
                                             Nothing
-                                else
-                                    Nothing
+                                    )
                             )
-                    )
-                    draftExpr
-                , playbackView (mkGetDef model.defs)
-                    (mkGetDef model.defs)
-                    draftExpr
+                            draftExpr
+
+                    Just frames ->
+                        playbackView (mkGetDef model.defs) frames
                 ]
 
 
@@ -382,42 +386,40 @@ typeView color typ =
         [ text typ ]
 
 
-playbackView getDefHtml getDefExpr expr =
+playbackView : Block.GetDef (Html Msg) -> Zipper EvalFrame -> Html Msg
+playbackView getDef frames =
     div [] <|
-        -- [hack] stealing dynamic view for now
-        List.map (exprView getDefHtml Nothing Nothing)
-        <|
-            generate
-                (\e ->
-                    let
-                        result =
-                            Block.stepCallByValue getDefExpr e
-                    in
-                        if result == e then
-                            Nothing
-                        else
-                            Just result
+        [ -- [hack] stealing dynamic view for now
+          -- [todo] remove getDef once this hack is removed
+          exprView getDef
+            Nothing
+            Nothing
+            (Tuple.first (Zipper.current frames))
+        , div []
+            [ button
+                (case Zipper.previous frames of
+                    Just newFrames ->
+                        [ disabled False, onClick (StepTo newFrames) ]
+
+                    Nothing ->
+                        [ disabled True ]
                 )
-                expr
+                [ text "<" ]
+            , button
+                (case Zipper.next frames of
+                    Just newFrames ->
+                        [ disabled False, onClick (StepTo newFrames) ]
+
+                    Nothing ->
+                        [ disabled True ]
+                )
+                [ text ">" ]
+            ]
+        ]
 
 
 
 -- HELPER
-
-
-generate : (a -> Maybe a) -> a -> List a
-generate gen =
-    let
-        go : List a -> a -> List a
-        go xs x =
-            case gen x of
-                Nothing ->
-                    x :: xs
-
-                Just next ->
-                    go (x :: xs) next
-    in
-        go []
 
 
 onMouseDown : (Mouse.Position -> msg) -> Attribute msg

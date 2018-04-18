@@ -15,11 +15,14 @@ module Block
         , stepCallByName
         , stepCallByValue
         , reduceCallByValue
+        , reduceCallByValueSelection
+        , reduceCallByValueSelectionAt
         , testExpr
         , int
         , intlit
         )
 
+import Helper
 import Debug
 
 
@@ -182,34 +185,6 @@ exprAt =
             )
 
 
-
--- exprAt indices =
---     let
---         go : Indices -> Expr -> Maybe Expr
---         go idxs e =
---             if idxs == indices then
---                 Just e
---             else
---                 case e of
---                     Var name ->
---                         Nothing
---
---                     Hole name ->
---                         Nothing
---
---                     App f args ->
---                         List.head <|
---                             List.filterMap identity <|
---                                 List.indexedMap
---                                     (\idx -> go (idxs ++ [ idx ]))
---                                     args
---
---                     Lit lit ->
---                         Nothing
---     in
---         go []
-
-
 setAt : Indices -> Expr -> Expr -> Expr
 setAt indices val =
     let
@@ -297,6 +272,33 @@ stepCallByName getDef expr =
             Lit lit
 
 
+reduceCallByValueSelection : GetDef Expr -> Expr -> List ( Expr, Indices )
+reduceCallByValueSelection getDef expr =
+    Helper.generate
+        (Tuple.first >> stepCallByValueSelection getDef)
+        ( expr, [] )
+
+
+reduceCallByValueSelectionAt :
+    Indices
+    -> GetDef Expr
+    -> Expr
+    -> List ( Expr, Indices )
+reduceCallByValueSelectionAt indices getDef expr =
+    case exprAt indices expr of
+        Just e ->
+            reduceCallByValueSelection getDef e
+                |> List.map
+                    (\( subExpr, subIdxs ) ->
+                        ( setAt indices subExpr expr
+                        , indices ++ subIdxs
+                        )
+                    )
+
+        Nothing ->
+            Debug.crash "Indices out of bound"
+
+
 reduceCallByValue getDef expr =
     let
         result =
@@ -308,40 +310,40 @@ reduceCallByValue getDef expr =
             reduceCallByValue getDef result
 
 
-stepCallByValue : GetDef Expr -> Expr -> Expr
-stepCallByValue getDef expr =
+stepCallByValueSelection : GetDef Expr -> Expr -> Maybe ( Expr, Indices )
+stepCallByValueSelection getDef expr =
     let
-        go : Expr -> ( Bool, Expr )
-        go expr =
-            case expr of
-                Var name ->
-                    ( False, Var name )
+        var _ name =
+            ( Nothing, Var name )
 
-                Hole name ->
-                    ( False, Hole name )
+        hole _ name =
+            ( Nothing, Hole name )
 
-                App f args ->
-                    let
-                        ( didStep, args_ ) =
-                            List.map go args
-                                |> (\xs ->
-                                        ( List.any Tuple.first xs
-                                        , List.map Tuple.second xs
-                                        )
-                                   )
-                    in
-                        if didStep then
-                            ( True, App f args_ )
-                        else if f == "add" then
+        app idxs f args =
+            let
+                didStep =
+                    args
+                        |> List.filterMap Tuple.first
+                        |> List.head
+
+                args_ =
+                    List.map Tuple.second args
+            in
+                case didStep of
+                    Just subIdxs ->
+                        ( Just subIdxs, App f args_ )
+
+                    Nothing ->
+                        if f == "add" then
                             -- [hack] pick out basic operations
                             case args of
-                                [ Lit x, Lit y ] ->
-                                    ( True, Lit (x + y) )
+                                [ ( _, Lit x ), ( _, Lit y ) ] ->
+                                    ( Just idxs, Lit (x + y) )
 
                                 _ ->
-                                    ( False, App f args )
+                                    ( Nothing, App f args_ )
                         else
-                            ( True
+                            ( Just idxs
                             , getDef f
                                 (\_ ctnts rhs ->
                                     let
@@ -358,16 +360,77 @@ stepCallByValue getDef expr =
                                                 ctnts
 
                                         subs =
-                                            List.map2 ((,)) vars args
+                                            List.map2 ((,)) vars args_
                                     in
                                         List.foldr (uncurry subst) rhs subs
                                 )
                             )
 
-                Lit lit ->
-                    ( False, Lit lit )
+        lit _ x =
+            ( Nothing, Lit x )
     in
-        Tuple.second <| go expr
+        let
+            ( idxs, e ) =
+                indexedFoldr var hole app lit expr
+        in
+            Maybe.map (((,)) e) idxs
+
+
+stepCallByValue : GetDef Expr -> Expr -> Expr
+stepCallByValue getDef =
+    let
+        var name =
+            ( False, Var name )
+
+        hole name =
+            ( False, Hole name )
+
+        app f args =
+            let
+                didStep =
+                    List.any Tuple.first args
+
+                args_ =
+                    List.map Tuple.second args
+            in
+                if didStep then
+                    ( True, App f args_ )
+                else if f == "add" then
+                    -- [hack] pick out basic operations
+                    case args of
+                        [ ( _, Lit x ), ( _, Lit y ) ] ->
+                            ( True, Lit (x + y) )
+
+                        _ ->
+                            ( False, App f args_ )
+                else
+                    ( True
+                    , getDef f
+                        (\_ ctnts rhs ->
+                            let
+                                vars =
+                                    List.filterMap
+                                        (\e ->
+                                            case e of
+                                                DefVar _ name ->
+                                                    Just name
+
+                                                _ ->
+                                                    Nothing
+                                        )
+                                        ctnts
+
+                                subs =
+                                    List.map2 ((,)) vars args_
+                            in
+                                List.foldr (uncurry subst) rhs subs
+                        )
+                    )
+
+        lit x =
+            ( False, Lit x )
+    in
+        Tuple.second << foldr var hole app lit
 
 
 subst : Name -> Expr -> Expr -> Expr
@@ -388,6 +451,16 @@ subst var val expr =
 
         Lit lit ->
             Lit lit
+
+
+isJust : Maybe a -> Bool
+isJust m =
+    case m of
+        Just _ ->
+            True
+
+        Nothing ->
+            False
 
 
 sequenceMaybes : List (Maybe a) -> Maybe (List a)

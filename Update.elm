@@ -8,6 +8,7 @@ import Msg exposing (..)
 import Model exposing (..)
 import Block
 import Mouse
+import List.Zipper as Zipper exposing (Zipper)
 
 
 subscriptions model =
@@ -151,11 +152,20 @@ update msg model =
 
         Reduce idxs ->
             { model
-                | draftExpr =
-                    Maybe.map
-                        (Block.updateAt idxs
-                            (Block.reduceCallByValue (mkGetDef model.defs))
-                        )
-                        model.draftExpr
+                | eval =
+                    model.draftExpr
+                        |> Maybe.map
+                            (Block.reduceCallByValueSelectionAt idxs
+                                (mkGetDef model.defs)
+                            )
+                        |> Maybe.andThen Zipper.fromList
             }
                 ! []
+
+        StepTo frames ->
+            case model.eval of
+                Just _ ->
+                    { model | eval = Just frames } ! []
+
+                Nothing ->
+                    Debug.crash "Stepping when not showing eval view"

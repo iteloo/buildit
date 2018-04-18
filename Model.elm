@@ -9,6 +9,7 @@ import Block
         )
 import Dict
 import Mouse
+import List.Zipper as Zipper exposing (Zipper)
 
 
 type alias Model =
@@ -16,6 +17,7 @@ type alias Model =
     , hover : Maybe Block.Indices
     , defs : Dict.Dict Block.Id Def
     , draftExpr : Maybe Expr
+    , eval : Maybe (Zipper EvalFrame)
     }
 
 
@@ -34,9 +36,7 @@ type alias Drag =
 
 
 type alias EvalFrame =
-    { selection : Block.Indices
-    , expr : Expr
-    }
+    ( Expr, Block.Indices )
 
 
 init =
@@ -45,6 +45,7 @@ init =
     , defs = defs
     , -- [tmp] hard-coded
       draftExpr = Just Block.testExpr
+    , eval = Nothing
     }
 
 

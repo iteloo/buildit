@@ -3,6 +3,7 @@ module Msg exposing (..)
 import Model exposing (..)
 import Block
 import Mouse
+import List.Zipper as Zipper exposing (Zipper)
 
 
 type Msg
@@ -14,3 +15,4 @@ type Msg
     | MouseOver Block.Indices
     | MouseLeave Block.Indices
     | Reduce Block.Indices
+    | StepTo (Zipper EvalFrame)
