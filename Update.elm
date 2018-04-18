@@ -25,6 +25,29 @@ subscriptions model =
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
+        LitEdit idxs str ->
+            { model
+                | draftExpr =
+                    Maybe.map
+                        (Block.updateAt idxs
+                            (\e ->
+                                case e of
+                                    Block.Lit _ ->
+                                        case String.toInt str of
+                                            Ok x ->
+                                                Block.Lit x
+
+                                            Err _ ->
+                                                e
+
+                                    _ ->
+                                        Debug.crash "Not a literal"
+                            )
+                        )
+                        model.draftExpr
+            }
+                ! []
+
         DragStart id pos ->
             { model
                 | dragging =
@@ -67,46 +90,57 @@ update msg model =
                     ! []
 
         DragEnd pos ->
-            { model
-                | dragging = Nothing
-                , draftExpr =
-                    Maybe.map
-                        (\e ->
-                            case Maybe.map2 ((,)) model.dragging model.hover of
-                                Nothing ->
-                                    e
-
-                                Just ( { itemId }, hoverIdxs ) ->
-                                    case itemId of
-                                        DraftItem dragIdxs ->
+            let
+                updExpr =
+                    case model.dragging |> Maybe.map .confirmed of
+                        Just True ->
+                            Maybe.map
+                                (\e ->
+                                    case Maybe.map2 ((,)) model.dragging model.hover of
+                                        Nothing ->
                                             e
-                                                -- [note] must remove first!
-                                                |> Block.removeAt dragIdxs
-                                                |> (case Block.exprAt dragIdxs e of
-                                                        Just dragExpr ->
-                                                            Block.setAt hoverIdxs dragExpr
 
-                                                        Nothing ->
-                                                            Debug.crash
-                                                                ("Cannot find expr at index: "
-                                                                    ++ toString dragIdxs
+                                        Just ( { itemId }, hoverIdxs ) ->
+                                            case itemId of
+                                                DraftItem dragIdxs ->
+                                                    e
+                                                        -- [note] must remove first!
+                                                        |> Block.removeAt dragIdxs
+                                                        |> (case Block.exprAt dragIdxs e of
+                                                                Just dragExpr ->
+                                                                    Block.setAt hoverIdxs dragExpr
+
+                                                                Nothing ->
+                                                                    Debug.crash
+                                                                        ("Cannot find expr at index: "
+                                                                            ++ toString dragIdxs
+                                                                        )
+                                                           )
+
+                                                LibItem f ->
+                                                    e
+                                                        |> Block.setAt hoverIdxs
+                                                            (mkGetDef model.defs
+                                                                f
+                                                                (\typ ctnts _ ->
+                                                                    Block.defLhsToExpr f
+                                                                        (Block.DefLhs typ ctnts)
                                                                 )
-                                                   )
+                                                            )
 
-                                        LibItem f ->
-                                            e
-                                                |> Block.setAt hoverIdxs
-                                                    (mkGetDef model.defs
-                                                        f
-                                                        (\typ ctnts _ ->
-                                                            Block.defLhsToExpr f
-                                                                (Block.DefLhs typ ctnts)
-                                                        )
-                                                    )
-                        )
-                        model.draftExpr
-            }
-                ! []
+                                                LibLiteral ->
+                                                    e
+                                                        |> Block.setAt hoverIdxs (Block.Lit 0)
+                                )
+
+                        _ ->
+                            identity
+            in
+                { model
+                    | dragging = Nothing
+                    , draftExpr = updExpr model.draftExpr
+                }
+                    ! []
 
         MouseOver idxs ->
             { model | hover = Just idxs }

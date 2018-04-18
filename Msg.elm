@@ -6,7 +6,8 @@ import Mouse
 
 
 type Msg
-    = DragStart Item Mouse.Position
+    = LitEdit Block.Indices String
+    | DragStart Item Mouse.Position
     | HoleMouseDown
     | DragAt Mouse.Position
     | DragEnd Mouse.Position

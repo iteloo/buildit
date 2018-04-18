@@ -226,7 +226,7 @@ reduceCallByValue getDef expr =
         if result == expr then
             result
         else
-            stepCallByValue getDef result
+            reduceCallByValue getDef result
 
 
 stepCallByValue : GetDef Expr -> Expr -> Expr

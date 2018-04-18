@@ -22,6 +22,7 @@ type alias Model =
 type Item
     = DraftItem Block.Indices
     | LibItem Block.Id
+    | LibLiteral
 
 
 type alias Drag =

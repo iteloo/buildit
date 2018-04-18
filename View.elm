@@ -63,6 +63,9 @@ view model =
                                         -- [note] the itemId is unnecessary,
                                         -- and may cause unexpected behaviour
                                         defView id lhs
+
+                            LibLiteral ->
+                                litView
                         ]
                 else
                     div [] []
@@ -95,7 +98,7 @@ editView model =
                                         DraftItem idxs ->
                                             Just idxs
 
-                                        LibItem _ ->
+                                        _ ->
                                             Nothing
                                 else
                                     Nothing
@@ -120,10 +123,18 @@ libView model =
             ]
             [ text "Library Blocks" ]
         , div [] <|
-            Dict.values <|
-                Dict.map
-                    (\id (Def lhs _) -> defView id lhs)
-                    model.defs
+            List.map
+                (div [ style [ ( "margin-bottom", "20px" ) ] ]
+                    << List.singleton
+                )
+            <|
+                List.concat
+                    [ Dict.values <|
+                        Dict.map
+                            (\id (Def lhs _) -> defView id lhs)
+                            model.defs
+                    , [ litView ]
+                    ]
         ]
 
 
@@ -149,6 +160,21 @@ defView id (DefLhs typ ctnts) =
                     )
                 )
                 ctnts
+        ]
+
+
+litView =
+    blockView "orange"
+        [ onMouseDown (DragStart LibLiteral)
+        ]
+        [ typeView "orange" Block.int
+        , div []
+            [ input
+                [ disabled True
+                , value "a number"
+                ]
+                []
+            ]
         ]
 
 
@@ -298,7 +324,13 @@ exprView getDef hoverIdxs dragIdxs =
                                         ]
                                     )
                                     [ typeView "orange" Block.int
-                                    , blockView "white" [] [ text (toString lit) ]
+                                    , div []
+                                        [ input
+                                            [ value (toString lit)
+                                            , onInput (LitEdit idxs)
+                                            ]
+                                            []
+                                        ]
                                     ]
     in
         go []
