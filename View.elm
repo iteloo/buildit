@@ -8,6 +8,7 @@ import Block
         , DefLhs(..)
         , DefContent(..)
         , Expr(..)
+        , Case(..)
         )
 import Helper
 import Html exposing (..)
@@ -214,6 +215,10 @@ exprView getDef hoverIdxs dragIdxs =
 
                         _ ->
                             []
+
+                evalButton =
+                    button [ onClick (Reduce idxs) ]
+                        [ text "Evaluate" ]
             in
                 case Maybe.map ((==) idxs) dragIdxs of
                     Just True ->
@@ -276,8 +281,7 @@ exprView getDef hoverIdxs dragIdxs =
                                             )
                                         <|
                                             [ typeView "green" typ
-                                            , button [ onClick (Reduce idxs) ]
-                                                [ text "Evaluate" ]
+                                            , evalButton
                                             , div
                                                 [ style [ ( "padding", "8px" ) ]
                                                 ]
@@ -337,6 +341,61 @@ exprView getDef hoverIdxs dragIdxs =
                                             []
                                         ]
                                     ]
+
+                            Constructor c args ->
+                                blockView "red"
+                                    (List.concat
+                                        [ [ dragStart
+                                          ]
+                                        , hoverHighlight
+                                        ]
+                                    )
+                                <|
+                                    List.concat
+                                        [ [ text c
+                                          , div
+                                                [ style [ ( "padding", "8px" ) ]
+                                                ]
+                                            <|
+                                                List.indexedMap
+                                                    (\idx ->
+                                                        holeView "green"
+                                                            []
+                                                            << List.singleton
+                                                            << go (idxs ++ [ idx ])
+                                                    )
+                                                    args
+                                          ]
+                                        ]
+
+                            CaseStmt e cases ->
+                                blockView "blue"
+                                    (List.concat
+                                        [ [ dragStart
+                                          ]
+                                        , hoverHighlight
+                                        ]
+                                    )
+                                <|
+                                    List.concat
+                                        [ [ evalButton
+                                          , text "case "
+                                          , go (idxs ++ [ 0 ]) e
+                                          , text " of"
+                                          ]
+                                        , List.indexedMap
+                                            (\idx (Case c params rhs) ->
+                                                div []
+                                                    [ (c :: params)
+                                                        |> List.intersperse " "
+                                                        |> List.foldr (++) ""
+                                                        |> text
+                                                    , go (idxs ++ [ idx + 1 ])
+                                                        rhs
+                                                    ]
+                                            )
+                                            cases
+                                        ]
     in
         go []
 

@@ -1,6 +1,7 @@
 module Block
     exposing
         ( Expr(..)
+        , Case(..)
         , Indices
         , Id
         , Def(..)
@@ -13,13 +14,17 @@ module Block
         , removeAt
         , updateAt
         , stepCallByName
-        , stepCallByValue
-        , reduceCallByValue
         , reduceCallByValueSelection
         , reduceCallByValueSelectionAt
+        , consId
+        , emptyListId
+        , cons
+        , emptyList
         , testExpr
         , int
         , intlit
+        , string
+        , list
         )
 
 import Helper
@@ -43,6 +48,14 @@ type Expr
     | Hole Name
     | App Id (List Expr)
     | Lit Int
+    | Constructor Name (List Expr)
+    | CaseStmt Expr (List Case)
+
+
+{-| Case constructor args rhs
+-}
+type Case
+    = Case Name (List Name) Expr
 
 
 type alias Indices =
@@ -59,6 +72,16 @@ intlit num =
     Lit num
 
 
+string : Type
+string =
+    "string"
+
+
+list : Type -> Type
+list typ =
+    "list of " ++ typ
+
+
 add23 : Expr
 add23 =
     App "add" [ intlit 2, intlit 3 ]
@@ -69,9 +92,41 @@ addHoles =
     App "add" [ Hole "x", Hole "y" ]
 
 
+consId =
+    "Cons"
+
+
+emptyListId =
+    "[]"
+
+
+emptyList : Expr
+emptyList =
+    Constructor emptyListId []
+
+
+cons : Expr -> Expr -> Expr
+cons x y =
+    Constructor "Cons" [ x, y ]
+
+
+listExprFromListOfInt : List Int -> Expr
+listExprFromListOfInt =
+    List.foldr cons emptyList << List.map Lit
+
+
+range02 : Expr
+range02 =
+    listExprFromListOfInt (List.range 0 2)
+
+
+range56 =
+    listExprFromListOfInt (List.range 5 6)
+
+
 testExpr : Expr
 testExpr =
-    App "add" [ add23, addHoles ]
+    App "append" [ range02, Hole "a list" ]
 
 
 type DefLhs
@@ -111,21 +166,38 @@ foldr :
     -> (Name -> s)
     -> (Id -> List s -> s)
     -> (Int -> s)
+    -> (Name -> List s -> s)
+    -> (s -> List t -> s)
+    -> (Name -> List Name -> s -> t)
     -> Expr
     -> s
-foldr var hole app lit e =
-    case e of
-        Var name ->
-            var name
+foldr var hole app lit constructor caseStmt caseBranch e =
+    let
+        go =
+            foldr var hole app lit constructor caseStmt caseBranch
+    in
+        case e of
+            Var name ->
+                var name
 
-        Hole name ->
-            hole name
+            Hole name ->
+                hole name
 
-        App f args ->
-            app f (List.map (foldr var hole app lit) args)
+            App f args ->
+                app f (List.map go args)
 
-        Lit x ->
-            lit x
+            Lit x ->
+                lit x
+
+            Constructor name args ->
+                constructor name (List.map go args)
+
+            CaseStmt e cases ->
+                caseStmt (go e)
+                    (List.map
+                        (\(Case c args rhs) -> caseBranch c args (go rhs))
+                        cases
+                    )
 
 
 indexedFoldr :
@@ -133,9 +205,12 @@ indexedFoldr :
     -> (Indices -> Name -> s)
     -> (Indices -> Id -> List s -> s)
     -> (Indices -> Int -> s)
+    -> (Indices -> Name -> List s -> s)
+    -> (Indices -> s -> List t -> s)
+    -> (Name -> List Name -> s -> t)
     -> Expr
     -> s
-indexedFoldr var hole app lit =
+indexedFoldr var hole app lit constructor caseStmt caseBranch =
     flip
         (foldr
             (flip var)
@@ -149,6 +224,23 @@ indexedFoldr var hole app lit =
                     )
             )
             (flip lit)
+            (\c args idxs ->
+                constructor idxs
+                    c
+                    (List.indexedMap
+                        (\idx -> (|>) (idxs ++ [ idx ]))
+                        args
+                    )
+            )
+            (\e cases idxs ->
+                caseStmt idxs
+                    (e (idxs ++ [ 0 ]))
+                    (List.indexedMap
+                        (\idx -> (|>) (idxs ++ [ idx + 1 ]))
+                        cases
+                    )
+            )
+            (\c params rhs idxs -> caseBranch c params (rhs idxs))
         )
         []
 
@@ -182,6 +274,39 @@ exprAt =
                                 |> Maybe.andThen identity
                 )
                 (end << Lit)
+                (\c args left ->
+                    case left of
+                        [] ->
+                            Maybe.map (Constructor c) <|
+                                sequenceMaybes (List.map ((|>) []) args)
+
+                        idx :: idxs ->
+                            args
+                                |> List.map ((|>) idxs)
+                                |> List.drop idx
+                                |> List.head
+                                |> Maybe.andThen identity
+                )
+                (\e cases left ->
+                    case left of
+                        [] ->
+                            Maybe.map2 CaseStmt (e []) <|
+                                sequenceMaybes (List.map ((|>) []) cases)
+
+                        idx :: idxs ->
+                            (e
+                                :: List.map
+                                    ((<<) (Maybe.map (\(Case _ _ rhs) -> rhs)))
+                                    cases
+                            )
+                                |> List.map ((|>) idxs)
+                                |> List.drop idx
+                                |> List.head
+                                |> Maybe.andThen identity
+                )
+                (\c args rhs left ->
+                    Maybe.map (Case c args) (rhs left)
+                )
             )
 
 
@@ -208,6 +333,20 @@ setAt indices val =
 
                     Lit lit ->
                         Lit lit
+
+                    Constructor name args ->
+                        Constructor name <|
+                            List.indexedMap
+                                (\idx -> go (idxs ++ [ idx ]))
+                                args
+
+                    CaseStmt e cases ->
+                        CaseStmt (go (idxs ++ [ 0 ]) e) <|
+                            List.indexedMap
+                                (\idx (Case c params rhs) ->
+                                    Case c params (go (idxs ++ [ idx + 1 ]) rhs)
+                                )
+                                cases
     in
         go []
 
@@ -271,6 +410,12 @@ stepCallByName getDef expr =
         Lit lit ->
             Lit lit
 
+        Constructor name args ->
+            Constructor name args
+
+        CaseStmt e cases ->
+            CaseStmt e cases
+
 
 reduceCallByValueSelection : GetDef Expr -> Expr -> List ( Expr, Indices )
 reduceCallByValueSelection getDef expr =
@@ -299,15 +444,8 @@ reduceCallByValueSelectionAt indices getDef expr =
             Debug.crash "Indices out of bound"
 
 
-reduceCallByValue getDef expr =
-    let
-        result =
-            stepCallByValue getDef expr
-    in
-        if result == expr then
-            result
-        else
-            reduceCallByValue getDef result
+type MatchErr
+    = NotConstructorErr
 
 
 stepCallByValueSelection : GetDef Expr -> Expr -> Maybe ( Expr, Indices )
@@ -368,89 +506,104 @@ stepCallByValueSelection getDef expr =
 
         lit _ x =
             ( Nothing, Lit x )
-    in
-        let
-            ( idxs, e ) =
-                indexedFoldr var hole app lit expr
-        in
-            Maybe.map (((,)) e) idxs
 
-
-stepCallByValue : GetDef Expr -> Expr -> Expr
-stepCallByValue getDef =
-    let
-        var name =
-            ( False, Var name )
-
-        hole name =
-            ( False, Hole name )
-
-        app f args =
+        constructor idxs c args =
             let
                 didStep =
-                    List.any Tuple.first args
+                    args
+                        |> List.filterMap Tuple.first
+                        |> List.head
 
                 args_ =
                     List.map Tuple.second args
             in
-                if didStep then
-                    ( True, App f args_ )
-                else if f == "add" then
-                    -- [hack] pick out basic operations
-                    case args of
-                        [ ( _, Lit x ), ( _, Lit y ) ] ->
-                            ( True, Lit (x + y) )
+                ( didStep, Constructor c args_ )
+
+        caseStmt idxs ( eDidStep, e ) cases =
+            let
+                didStep =
+                    cases
+                        |> List.filterMap Tuple.first
+                        |> List.head
+
+                cases_ =
+                    List.map Tuple.second cases
+
+                matchNSub : Expr -> Case -> Maybe (Result MatchErr Expr)
+                matchNSub e (Case c params rhs) =
+                    case e of
+                        Constructor cname args ->
+                            if cname == c then
+                                Just <|
+                                    Ok
+                                        (List.map2 ((,)) params args
+                                            |> List.foldr (uncurry subst) rhs
+                                        )
+                            else
+                                Nothing
 
                         _ ->
-                            ( False, App f args_ )
-                else
-                    ( True
-                    , getDef f
-                        (\_ ctnts rhs ->
-                            let
-                                vars =
-                                    List.filterMap
-                                        (\e ->
-                                            case e of
-                                                DefVar _ name ->
-                                                    Just name
+                            Just (Err NotConstructorErr)
+            in
+                case eDidStep of
+                    Just eIdxs ->
+                        ( Just eIdxs, CaseStmt e cases_ )
 
-                                                _ ->
-                                                    Nothing
-                                        )
-                                        ctnts
+                    Nothing ->
+                        case
+                            List.filterMap (matchNSub e) cases_
+                                |> List.head
+                        of
+                            Just (Ok e) ->
+                                ( Just idxs, e )
 
-                                subs =
-                                    List.map2 ((,)) vars args_
-                            in
-                                List.foldr (uncurry subst) rhs subs
-                        )
-                    )
+                            Just (Err NotConstructorErr) ->
+                                ( Nothing, e )
 
-        lit x =
-            ( False, Lit x )
+                            Nothing ->
+                                Debug.crash "Unhandled case branch"
+
+        cb c params rhs =
+            Tuple.mapSecond (Case c params) rhs
     in
-        Tuple.second << foldr var hole app lit
+        let
+            ( idxs, e ) =
+                indexedFoldr var hole app lit constructor caseStmt cb expr
+        in
+            Maybe.map (((,)) e) idxs
 
 
 subst : Name -> Expr -> Expr -> Expr
 subst var val expr =
-    case expr of
-        Var name ->
-            if name == var then
-                val
-            else
-                Var name
+    let
+        go =
+            subst var val
+    in
+        case expr of
+            Var name ->
+                if name == var then
+                    val
+                else
+                    Var name
 
-        Hole name ->
-            Hole name
+            Hole name ->
+                Hole name
 
-        App id exprs ->
-            -- [tofix] capture
-            App id (List.map (subst var val) exprs)
+            App id exprs ->
+                -- [tofix] capture
+                App id (List.map go exprs)
 
-        Lit lit ->
-            Lit lit
+            Lit lit ->
+                Lit lit
+
+            Constructor name args ->
+                Constructor name (List.map go args)
+
+            CaseStmt e cases ->
+                CaseStmt (go e) <|
+                    List.map
+                        (\(Case c params rhs) -> Case c params (go rhs))
+                        cases
 
 
 isJust : Maybe a -> Bool

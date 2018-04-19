@@ -6,6 +6,7 @@ import Block
         , DefLhs(..)
         , DefContent(..)
         , Expr(..)
+        , Case(..)
         )
 import Dict
 import Mouse
@@ -97,8 +98,56 @@ add1 =
         )
 
 
+appendId =
+    "append"
+
+
+append =
+    let
+        aList =
+            "a list"
+
+        anotherList =
+            "another list"
+
+        listofInt =
+            Block.list Block.int
+    in
+        Def
+            (DefLhs listofInt
+                [ DefVar listofInt aList
+                , DefText "followed by"
+                , DefVar listofInt anotherList
+                ]
+            )
+            (CaseStmt (Var aList)
+                [ Case Block.emptyListId
+                    []
+                    (Var anotherList)
+                , let
+                    firstElement =
+                        "first element"
+
+                    restOfTheList =
+                        "rest of the list"
+                  in
+                    Case Block.consId
+                        [ firstElement, restOfTheList ]
+                        (Block.cons
+                            (Var firstElement)
+                            (App appendId
+                                [ Var restOfTheList
+                                , Var anotherList
+                                ]
+                            )
+                        )
+                ]
+            )
+
+
 defs =
     Dict.fromList
         [ ( addId, add )
         , ( "add1", add1 )
+        , ( appendId, append )
         ]
