@@ -81,7 +81,7 @@ editView model =
     div
         [ style
             [ ( "flex", "50%" )
-            , ( "padding", "20px" )
+            , ( "padding", "8px" )
             ]
         ]
     <|
@@ -119,7 +119,7 @@ libView model =
     div
         [ style
             [ ( "flex", "50%" )
-            , ( "padding", "20px" )
+            , ( "padding", "8px" )
             ]
         ]
         [ h3
@@ -131,7 +131,7 @@ libView model =
             [ text "Library Blocks" ]
         , div [] <|
             List.map
-                (div [ style [ ( "margin-bottom", "20px" ) ] ]
+                (div [ style [ ( "margin-bottom", "8px" ) ] ]
                     << List.singleton
                 )
             <|
@@ -151,7 +151,7 @@ defView id (DefLhs typ ctnts) =
         ]
     <|
         [ typeView "green" typ
-        , div [ style [ ( "padding", "20px" ) ] ] <|
+        , div [ style [ ( "padding", "8px" ) ] ] <|
             List.map
                 (\defContent ->
                     (case defContent of
@@ -208,7 +208,7 @@ exprView getDef hoverIdxs dragIdxs =
                     case Maybe.map ((==) idxs) hoverIdxs of
                         Just True ->
                             [ style
-                                [ ( "box-shadow", "0px 0px 20px grey" )
+                                [ ( "box-shadow", "0px 0px 8px grey" )
                                 ]
                             ]
 
@@ -279,26 +279,25 @@ exprView getDef hoverIdxs dragIdxs =
                                             , button [ onClick (Reduce idxs) ]
                                                 [ text "Evaluate" ]
                                             , div
-                                                [ style [ ( "padding", "20px" ) ]
+                                                [ style [ ( "padding", "8px" ) ]
                                                 ]
                                               <|
                                                 List.reverse <|
-                                                    (\( _, a, _ ) -> a) <|
-                                                        List.foldr
-                                                            (\defContent ( args, content, idx ) ->
+                                                    Tuple.first <|
+                                                        List.foldl
+                                                            (\defContent ( content, ( args, idx ) ) ->
                                                                 (case defContent of
                                                                     DefVar _ _ ->
                                                                         case args of
                                                                             arg :: ags ->
-                                                                                ( ags
-                                                                                , holeView "green"
+                                                                                ( holeView "green"
                                                                                     []
                                                                                     [ go
                                                                                         (idxs ++ [ idx ])
                                                                                         arg
                                                                                     ]
                                                                                     :: content
-                                                                                , idx + 1
+                                                                                , ( ags, idx + 1 )
                                                                                 )
 
                                                                             [] ->
@@ -308,16 +307,15 @@ exprView getDef hoverIdxs dragIdxs =
                                                                                     )
 
                                                                     DefText txt ->
-                                                                        ( args
-                                                                        , blockView "white"
+                                                                        ( blockView "white"
                                                                             []
                                                                             [ text txt ]
                                                                             :: content
-                                                                        , idx
+                                                                        , ( args, idx )
                                                                         )
                                                                 )
                                                             )
-                                                            ( args, [], 0 )
+                                                            ( [], ( args, 0 ) )
                                                             ctnts
                                             ]
                                     )

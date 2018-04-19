@@ -154,11 +154,12 @@ update msg model =
             { model
                 | eval =
                     model.draftExpr
-                        |> Maybe.map
+                        |> Maybe.andThen
                             (Block.reduceCallByValueSelectionAt idxs
                                 (mkGetDef model.defs)
+                                >> Zipper.fromList
                             )
-                        |> Maybe.andThen Zipper.fromList
+                        |> Maybe.map Zipper.last
             }
                 ! []
 

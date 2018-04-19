@@ -79,10 +79,26 @@ add =
             , DefVar Block.int "y"
             ]
         )
+        -- [hack] bogus value
         (Var "x")
+
+
+add1 =
+    Def
+        (DefLhs Block.int
+            [ DefVar Block.int "x"
+            , DefText "incremented by 1"
+            ]
+        )
+        (App addId
+            [ Var "x"
+            , Lit 1
+            ]
+        )
 
 
 defs =
     Dict.fromList
         [ ( addId, add )
+        , ( "add1", add1 )
         ]
