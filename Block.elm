@@ -9,6 +9,7 @@ module Block
         , DefContent(..)
         , GetDef
         , defLhsToExpr
+        , foldr
         , exprAt
         , setAt
         , removeAt
@@ -25,6 +26,7 @@ module Block
         , intlit
         , string
         , list
+        , add23
         )
 
 import Helper

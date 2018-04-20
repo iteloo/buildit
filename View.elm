@@ -377,25 +377,39 @@ exprView getDef hoverIdxs dragIdxs =
                                         ]
                                     )
                                 <|
-                                    List.concat
-                                        [ [ evalButton
-                                          , text "case "
-                                          , go (idxs ++ [ 0 ]) e
-                                          , text " of"
-                                          ]
-                                        , List.indexedMap
-                                            (\idx (Case c params rhs) ->
-                                                div []
-                                                    [ (c :: params)
-                                                        |> List.intersperse " "
-                                                        |> List.foldr (++) ""
-                                                        |> text
-                                                    , go (idxs ++ [ idx + 1 ])
-                                                        rhs
+                                    List.singleton <|
+                                        div
+                                            [ style [ ( "padding", "8px" ) ]
+                                            ]
+                                        <|
+                                            List.map (div [] << List.singleton) <|
+                                                List.concat
+                                                    [ [ evalButton
+                                                      ]
+                                                    , List.intersperse (text "------------") <|
+                                                        List.concat
+                                                            [ [ div []
+                                                                    [ text "Pick a different thing depending on which possilibity"
+                                                                    , go (idxs ++ [ 0 ]) e
+                                                                    , text "is:"
+                                                                    ]
+                                                              ]
+                                                            , List.indexedMap
+                                                                (\idx (Case c params rhs) ->
+                                                                    div []
+                                                                        [ text "If it is "
+                                                                        , (c :: params)
+                                                                            |> List.intersperse " "
+                                                                            |> List.foldr (++) ""
+                                                                            |> text
+                                                                        , text ", pick "
+                                                                        , go (idxs ++ [ idx + 1 ])
+                                                                            rhs
+                                                                        ]
+                                                                )
+                                                                cases
+                                                            ]
                                                     ]
-                                            )
-                                            cases
-                                        ]
     in
         go []
 
