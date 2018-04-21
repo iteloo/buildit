@@ -186,14 +186,100 @@ infer data =
                 Nothing ->
                     Debug.crash "No type data found"
 
-        constructor _ =
-            Debug.crash ""
+        constructor c args mc =
+            case Dict.get c data of
+                Just (BlockType returnType paramTypes) ->
+                    List.foldl
+                        (\( arg, paramType ) ->
+                            Result.andThen
+                                (\cts ->
+                                    arg (Just (applyConstraints cts paramType))
+                                        |> Result.map
+                                            (Tuple.second >> (++) cts)
+                                )
+                        )
+                        (Ok [])
+                        (List.map2 ((,)) args paramTypes)
+                        |> Result.andThen
+                            (flip applyConstraints returnType
+                                -- [note] cts aren't useful anymore
+                                -- after this, since all variables
+                                -- are eliminated
+                                >> (\t ->
+                                        case mc of
+                                            Just c ->
+                                                match t c
+                                                    |> Result.fromMaybe NoMatch
+                                                    |> Result.map
+                                                        (\cts -> ( t, cts ))
 
-        caseStmt _ =
-            Debug.crash ""
+                                            Nothing ->
+                                                Ok ( t, [] )
+                                   )
+                            )
 
-        cb _ =
-            Debug.crash ""
+                Nothing ->
+                    Debug.crash "No type data found"
+
+        caseStmt :
+            (Maybe Type -> Result InferenceError ( Type, List Constraint ))
+            ->
+                List
+                    (Maybe Type
+                     ->
+                        Result InferenceError
+                            ( ( -- type of matched case
+                                Type
+                                -- type of the rhs
+                              , Type
+                              )
+                            , List Constraint
+                            )
+                    )
+            -> Maybe Type
+            -> Result InferenceError ( Type, List Constraint )
+        caseStmt e cases mc =
+            cases
+                |> List.map ((|>) mc)
+                |> List.foldr (Result.map2 (::)) (Ok [])
+                |> Debug.crash ""
+
+        cb :
+            Name
+            -> List Name
+            ->
+                (Maybe Type
+                 -> Result InferenceError ( Type, List Constraint )
+                )
+            -- type constraint on the rhs value
+            -> Maybe Type
+            ->
+                Result InferenceError
+                    ( ( -- type of matched case
+                        Type
+                        -- type of the rhs
+                      , Type
+                      )
+                    , List Constraint
+                    )
+        cb c params rhs mrhsc =
+            case Dict.get c data of
+                Just (BlockType returnType paramTypes) ->
+                    let
+                        -- [tofix] not used right now
+                        varBindings =
+                            Dict.fromList <|
+                                List.map2 ((,)) params paramTypes
+                    in
+                        -- [tofix] should use varBindings
+                        rhs mrhsc
+                            |> Result.map
+                                (Tuple.mapFirst
+                                    (\trhs -> ( returnType, trhs ))
+                                )
+
+                Nothing ->
+                    Debug.crash "Cannot find constructor type data"
 
         lit _ mc =
             case mc of
