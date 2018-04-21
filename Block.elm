@@ -21,12 +21,15 @@ module Block
         , emptyListId
         , cons
         , emptyList
+        , appendId
         , testExpr
         , int
         , intlit
         , string
         , list
         , add23
+        , range02
+        , range56
         )
 
 import Helper
@@ -126,9 +129,13 @@ range56 =
     listExprFromListOfInt (List.range 5 6)
 
 
+appendId =
+    "append"
+
+
 testExpr : Expr
 testExpr =
-    App "append" [ range02, Hole "a list" ]
+    App appendId [ range02, Hole "a list" ]
 
 
 type DefLhs
