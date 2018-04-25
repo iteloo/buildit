@@ -101,6 +101,11 @@ map2ModEnv f =
     apModEnv << mapModEnv f
 
 
+unsafePrintEnv : ModEnv ()
+unsafePrintEnv =
+    \env -> Ok ( Debug.log (showEnv env) (), env )
+
+
 sequenceModEnvs : List (ModEnv a) -> ModEnv (List a)
 sequenceModEnvs =
     List.foldr (map2ModEnv (::)) (return [])
@@ -127,18 +132,74 @@ applyConstraints env typ =
             ParamType f (List.map (applyConstraints env) typs)
 
 
+applyConstraintsM : Type -> ModEnv Type
+applyConstraintsM typ =
+    \env -> Ok ( applyConstraints env typ, env )
+
+
+allTVars : Type -> List TVarName
+allTVars =
+    let
+        go : List TVarName -> Type -> List TVarName
+        go tvars t =
+            case t of
+                TypeVar n ->
+                    n :: tvars
+
+                BaseType _ ->
+                    tvars
+
+                FuncType ta tb ->
+                    go tvars ta ++ go tvars tb
+
+                ParamType _ typs ->
+                    List.concatMap (go tvars) typs
+    in
+        go []
+
+
+rewriteWithFreshTVars : Type -> ModEnv Type
+rewriteWithFreshTVars t =
+    allTVars t
+        |> List.map
+            (\n ->
+                newTVarM
+                    |> andThenModEnv
+                        (\new ->
+                            return ( n, new )
+                        )
+            )
+        |> sequenceModEnvs
+        |> andThenModEnv
+            (\subs ->
+                return
+                    (applyConstraints
+                        (TVarEnv
+                            (-- [hack] bogus value
+                             0
+                            )
+                            (Dict.fromList subs)
+                        )
+                        t
+                    )
+            )
+
+
 {-| match the typevars in the two type expressions, and
 extend the tvar environment with new constraints
 -}
 setEqual : Type -> Type -> ModEnv ()
-setEqual t1 t2 env =
+setEqual t1 t2 =
     let
+        -- Assume type var inputs are free
         go : Type -> Type -> ModEnv ()
         go t1 t2 =
             case ( t1, t2 ) of
+                -- Assumes TypeVar n is free
                 ( TypeVar n, t ) ->
                     setEqualTVar n t
 
+                -- Assumes TypeVar n is free
                 ( t, TypeVar n ) ->
                     setEqualTVar n t
 
@@ -177,25 +238,101 @@ setEqual t1 t2 env =
                     else
                         envExtendM ( n, TypeVar n_ )
 
+                -- Non-typevar case
                 t_ ->
-                    -- [tofix] check occurence
-                    envExtendM ( n, t_ )
+                    let
+                        contains : TVarEnv -> TVarName -> Type -> Bool
+                        contains env n t =
+                            let
+                                go t =
+                                    case t of
+                                        TypeVar n_ ->
+                                            case lookupTVar env n_ of
+                                                Just t_ ->
+                                                    go t_
 
-        getFirstNontrivial : Type -> Type
-        getFirstNontrivial t =
-            case t of
-                TypeVar n ->
-                    case lookupTVar env n of
-                        Just t ->
-                            getFirstNontrivial t
+                                                Nothing ->
+                                                    n == n_
 
-                        Nothing ->
-                            t
+                                        BaseType n_ ->
+                                            False
 
-                _ ->
-                    t
+                                        FuncType ta tb ->
+                                            go ta || go tb
+
+                                        ParamType _ targs ->
+                                            List.any go targs
+                            in
+                                go t
+
+                        containsM : TVarName -> Type -> ModEnv Bool
+                        containsM n t =
+                            \env -> Ok ( contains env n t, env )
+                    in
+                        containsM n t_
+                            |> andThenModEnv
+                                (\cont ->
+                                    \env ->
+                                        if cont then
+                                            Debug.crash <|
+                                                unwords
+                                                    [ "Trying to set"
+                                                    , showType (TypeVar n)
+                                                    , "to"
+                                                    , showType t_
+                                                    , ", but the latter"
+                                                    , "contains the former"
+                                                    , "in env"
+                                                    , showEnv env
+                                                    ]
+                                        else
+                                            {- [note] important to subsitute first
+                                               Otherwise we might end up with
+                                               constraints like a=list a
+                                            -}
+                                            (applyConstraintsM t_
+                                                |> andThenModEnv
+                                                    (\t__ ->
+                                                        envExtendM ( n, t__ )
+                                                    )
+                                            )
+                                                env
+                                )
     in
-        go (getFirstNontrivial t1) (getFirstNontrivial t2) env
+        \env ->
+            let
+                getFirstNontrivial : Type -> Type
+                getFirstNontrivial t =
+                    case t of
+                        TypeVar n ->
+                            case lookupTVar env n of
+                                Just t ->
+                                    getFirstNontrivial t
+
+                                Nothing ->
+                                    t
+
+                        _ ->
+                            t
+            in
+                go (getFirstNontrivial t1) (getFirstNontrivial t2) env
+                    |> Result.map
+                        (\( t, env1 ) ->
+                            Debug.log
+                                (unwords
+                                    [ "setting:"
+                                    , showType t1
+                                    , "\nequal to:"
+                                    , showType t2
+                                    , "\nin env:"
+                                    , showEnv env
+                                    , "\nresulting in:"
+                                    , showEnv env1
+                                    ]
+                                )
+                                ()
+                                |> (\() -> ( t, env1 ))
+                        )
 
 
 {-| run setEqual, starting from the left, return the last type
@@ -221,6 +358,12 @@ setEqualAll =
             )
 
 
+inferComplete : TypeData -> Expr -> Result InferenceError Type
+inferComplete tData expr =
+    infer tData expr emptyEnv
+        |> Result.map (uncurry (flip applyConstraints))
+
+
 infer : TypeData -> Expr -> ModEnv Type
 infer =
     let
@@ -237,30 +380,40 @@ infer =
                                 ( Nothing, t_ )
                     )
 
-        rollToFunctTypes : Nonempty Type -> Type
-        rollToFunctTypes =
+        rollToFuncTypes : Nonempty Type -> Type
+        rollToFuncTypes =
             Nonempty.foldl1 (:>)
 
         handleFunc f args env =
             case Dict.get f env of
-                Just t ->
-                    let
-                        ( returnType, _ ) =
-                            case unrollFuncTypes t of
-                                Nonempty x xs ->
-                                    ( x, xs )
-                    in
-                        -- lookup type signature for f
-                        -- create a new return tv for each arg
-                        -- match whole thing with type of f
-                        Nonempty
-                            (return returnType)
-                            (List.map ((|>) env) <| List.reverse args)
-                            |> Nonempty.toList
-                            |> sequenceModEnvs
-                            |> mapModEnv (toNonemptyUnsafe >> rollToFunctTypes)
-                            |> andThenModEnv (setEqual t)
-                            |> andThenModEnv (\_ -> return returnType)
+                Just t_ ->
+                    rewriteWithFreshTVars t_
+                        |> andThenModEnv
+                            (\t ->
+                                let
+                                    ( returnType, _ ) =
+                                        case unrollFuncTypes t of
+                                            Nonempty x xs ->
+                                                ( x, xs )
+                                in
+                                    -- lookup type signature for f
+                                    -- create a new return tv for each arg
+                                    -- match whole thing with type of f
+                                    Nonempty
+                                        (return returnType)
+                                        (List.map ((|>) env) <| List.reverse args)
+                                        |> Nonempty.toList
+                                        |> sequenceModEnvs
+                                        |> mapModEnv (toNonemptyUnsafe >> rollToFuncTypes)
+                                        |> andThenModEnv
+                                            (\x ->
+                                                unsafePrintEnv
+                                                    |> andThenModEnv (\_ -> return x)
+                                            )
+                                        |> andThenModEnv (setEqual t)
+                                        |> andThenModEnv (\_ -> unsafePrintEnv)
+                                        |> andThenModEnv (\_ -> return returnType)
+                            )
 
                 Nothing ->
                     Debug.crash <|
@@ -388,7 +541,7 @@ showType : Type -> String
 showType t =
     case t of
         TypeVar n ->
-            "x" ++ toString n
+            "t" ++ toString n
 
         BaseType n ->
             n
@@ -427,7 +580,7 @@ ex6 =
 
 
 ex7 =
-    infer typeData add23 emptyEnv
+    add23
 
 
 ex8 =
@@ -439,21 +592,94 @@ ex9 =
 
 
 ex10 =
-    App Block.appendId [ Block.range02, Block.range56 ]
+    append Block.range02 Block.range56
+
+
+ex11 =
+    append Block.range56 ex10
+
+
+ex12 =
+    singleton (singleton (Lit 1))
+
+
+ex13 =
+    append
+        (singleton Block.range56)
+        (append
+            (singleton Block.range02)
+            (singleton Block.emptyList)
+        )
+
+
+ex14 =
+    append
+        Block.emptyList
+        (singleton Block.emptyList)
+
+
+ex15 =
+    append
+        (singleton Block.range56)
+        (append
+            (singleton Block.range02)
+            (singleton Block.emptyList)
+        )
+
+
+ex16 =
+    listCase Block.emptyList
+        (Lit 1)
+        (\_ _ -> Lit 1)
 
 
 ex =
-    addHole
+    ex16
+
+
+showEnv : TVarEnv -> String
+showEnv (TVarEnv n dict) =
+    unwords
+        [ "{"
+        , dict
+            |> Dict.map (\n t -> showType (TypeVar n) ++ ":" ++ showType t)
+            |> Dict.values
+            |> List.foldr (++) ""
+        , "}"
+        ]
 
 
 main =
     text <|
-        case infer typeData ex emptyEnv of
-            Ok ( t, env ) ->
-                unwords [ showType t, "...", toString env ]
+        case inferComplete typeData ex of
+            Ok t ->
+                unwords [ showType t ]
 
             Err e ->
                 toString e
+
+
+append xs ys =
+    App Block.appendId [ xs, ys ]
+
+
+listCase : Expr -> Expr -> (Expr -> Expr -> Expr) -> Expr
+listCase e ifEmpty ifCons =
+    CaseStmt e
+        [ Block.Case Block.emptyListId [] ifEmpty
+        , let
+            head =
+                "head"
+
+            rest =
+                "rest"
+          in
+            Block.Case Block.consId [ head, rest ] (ifCons (Var head) (Var rest))
+        ]
+
+
+singleton a =
+    Block.cons a Block.emptyList
 
 
 addId =
@@ -482,6 +708,7 @@ typeData =
         , ( Block.consId, a :> list a :> list a )
         , ( Block.emptyListId, list a )
         , ( Block.appendId, list a :> list a :> list a )
+        , ( "map", mapType )
         ]
 
 
