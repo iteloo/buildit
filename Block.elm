@@ -30,10 +30,12 @@ module Block
         , add23
         , range02
         , range56
+        , nonemptyFoldr
         )
 
 import Helper
 import Debug
+import List.Nonempty as Nonempty exposing (Nonempty(..), (:::))
 
 
 type alias Type =
@@ -54,7 +56,7 @@ type Expr
     | App Id (List Expr)
     | Lit Int
     | Constructor Name (List Expr)
-    | CaseStmt Expr (List Case)
+    | CaseStmt Expr (Nonempty Case)
 
 
 {-| Case constructor args rhs
@@ -176,7 +178,7 @@ foldr :
     -> (Id -> List s -> s)
     -> (Int -> s)
     -> (Name -> List s -> s)
-    -> (s -> List t -> s)
+    -> (s -> Nonempty t -> s)
     -> (Name -> List Name -> s -> t)
     -> Expr
     -> s
@@ -203,7 +205,7 @@ foldr var hole app lit constructor caseStmt caseBranch e =
 
             CaseStmt e cases ->
                 caseStmt (go e)
-                    (List.map
+                    (Nonempty.map
                         (\(Case c args rhs) -> caseBranch c args (go rhs))
                         cases
                     )
@@ -215,7 +217,7 @@ indexedFoldr :
     -> (Indices -> Id -> List s -> s)
     -> (Indices -> Int -> s)
     -> (Indices -> Name -> List s -> s)
-    -> (Indices -> s -> List t -> s)
+    -> (Indices -> s -> Nonempty t -> s)
     -> (Name -> List Name -> s -> t)
     -> Expr
     -> s
@@ -244,7 +246,7 @@ indexedFoldr var hole app lit constructor caseStmt caseBranch =
             (\e cases idxs ->
                 caseStmt idxs
                     (e (idxs ++ [ 0 ]))
-                    (List.indexedMap
+                    (Nonempty.indexedMap
                         (\idx -> (|>) (idxs ++ [ idx + 1 ]))
                         cases
                     )
@@ -300,15 +302,17 @@ exprAt =
                     case left of
                         [] ->
                             Maybe.map2 CaseStmt (e []) <|
-                                sequenceMaybes (List.map ((|>) []) cases)
+                                sequenceMaybesNonempty
+                                    (Nonempty.map ((|>) []) cases)
 
                         idx :: idxs ->
                             (e
-                                :: List.map
-                                    ((<<) (Maybe.map (\(Case _ _ rhs) -> rhs)))
-                                    cases
+                                ::: Nonempty.map
+                                        ((<<) (Maybe.map (\(Case _ _ rhs) -> rhs)))
+                                        cases
                             )
-                                |> List.map ((|>) idxs)
+                                |> Nonempty.map ((|>) idxs)
+                                |> Nonempty.toList
                                 |> List.drop idx
                                 |> List.head
                                 |> Maybe.andThen identity
@@ -351,7 +355,7 @@ setAt indices val =
 
                     CaseStmt e cases ->
                         CaseStmt (go (idxs ++ [ 0 ]) e) <|
-                            List.indexedMap
+                            Nonempty.indexedMap
                                 (\idx (Case c params rhs) ->
                                     Case c params (go (idxs ++ [ idx + 1 ]) rhs)
                                 )
@@ -532,11 +536,12 @@ stepCallByValueSelection getDef expr =
             let
                 didStep =
                     cases
+                        |> Nonempty.toList
                         |> List.filterMap Tuple.first
                         |> List.head
 
                 cases_ =
-                    List.map Tuple.second cases
+                    Nonempty.map Tuple.second cases
 
                 matchNSub : Expr -> Case -> Maybe (Result MatchErr Expr)
                 matchNSub e (Case c params rhs) =
@@ -560,7 +565,9 @@ stepCallByValueSelection getDef expr =
 
                     Nothing ->
                         case
-                            List.filterMap (matchNSub e) cases_
+                            cases_
+                                |> Nonempty.toList
+                                |> List.filterMap (matchNSub e)
                                 |> List.head
                         of
                             Just (Ok e) ->
@@ -610,7 +617,7 @@ subst var val expr =
 
             CaseStmt e cases ->
                 CaseStmt (go e) <|
-                    List.map
+                    Nonempty.map
                         (\(Case c params rhs) -> Case c params (go rhs))
                         cases
 
@@ -628,3 +635,14 @@ isJust m =
 sequenceMaybes : List (Maybe a) -> Maybe (List a)
 sequenceMaybes =
     List.foldr (Maybe.map2 (::)) (Just [])
+
+
+sequenceMaybesNonempty : Nonempty (Maybe a) -> Maybe (Nonempty a)
+sequenceMaybesNonempty =
+    nonemptyFoldr (Maybe.map2 (:::)) (Maybe.map Nonempty.fromElement)
+
+
+nonemptyFoldr : (a -> b -> b) -> (a -> b) -> Nonempty a -> b
+nonemptyFoldr cons last =
+    Nonempty.reverse
+        >> (\(Nonempty x xs) -> List.foldl cons (last x) xs)

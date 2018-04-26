@@ -30,11 +30,17 @@ type alias TypeData =
 
 
 type InferenceError
-    = NoMatch
+    = CannotSetEqualError Type Type TVarEnv
+    | MissingTypeInfo Name
 
 
 type alias ModEnv a =
     TVarEnv -> Result InferenceError ( a, TVarEnv )
+
+
+getEnv : ModEnv TVarEnv
+getEnv =
+    \env -> Ok ( env, env )
 
 
 newTVarM : ModEnv Type
@@ -77,6 +83,11 @@ fail err _ =
     Err err
 
 
+failCannotSetEqualError : Type -> Type -> ModEnv ()
+failCannotSetEqualError t1 t2 =
+    getEnv |> andThenModEnv (\env -> fail (CannotSetEqualError t1 t2 env))
+
+
 andThenModEnv : (a -> ModEnv b) -> ModEnv a -> ModEnv b
 andThenModEnv f ma =
     ma >> Result.andThen (uncurry f)
@@ -103,12 +114,27 @@ map2ModEnv f =
 
 unsafePrintEnv : ModEnv ()
 unsafePrintEnv =
-    \env -> Ok ( Debug.log (showEnv env) (), env )
+    \env -> Ok ( log [ showEnv env ] (), env )
 
 
 sequenceModEnvs : List (ModEnv a) -> ModEnv (List a)
 sequenceModEnvs =
     List.foldr (map2ModEnv (::)) (return [])
+
+
+sequenceModEnvsNonempty : Nonempty (ModEnv a) -> ModEnv (Nonempty a)
+sequenceModEnvsNonempty =
+    Block.nonemptyFoldr (map2ModEnv (:::)) (mapModEnv Nonempty.fromElement)
+
+
+lookupFreshTypeData : TypeData -> Name -> ModEnv Type
+lookupFreshTypeData tdata varname =
+    case Dict.get varname tdata of
+        Just t ->
+            rewriteWithFreshTVars t
+
+        Nothing ->
+            fail (MissingTypeInfo varname)
 
 
 applyConstraints : TVarEnv -> Type -> Type
@@ -207,7 +233,7 @@ setEqual t1 t2 =
                     if p == t then
                         return ()
                     else
-                        fail NoMatch
+                        failCannotSetEqualError t1 t2
 
                 ( FuncType ta1 tb1, FuncType ta2 tb2 ) ->
                     -- compare return types first
@@ -223,10 +249,10 @@ setEqual t1 t2 =
                             sequenceModEnvs <|
                                 List.map2 setEqual targs1 targs2
                     else
-                        fail NoMatch
+                        failCannotSetEqualError t1 t2
 
                 _ ->
-                    fail NoMatch
+                    failCannotSetEqualError t1 t2
 
         setEqualTVar : TVarName -> Type -> ModEnv ()
         setEqualTVar n t =
@@ -318,21 +344,24 @@ setEqual t1 t2 =
                 go (getFirstNontrivial t1) (getFirstNontrivial t2) env
                     |> Result.map
                         (\( t, env1 ) ->
-                            Debug.log
-                                (unwords
-                                    [ "setting:"
-                                    , showType t1
-                                    , "\nequal to:"
-                                    , showType t2
-                                    , "\nin env:"
-                                    , showEnv env
-                                    , "\nresulting in:"
-                                    , showEnv env1
-                                    ]
-                                )
-                                ()
-                                |> (\() -> ( t, env1 ))
+                            log
+                                [ "setting:"
+                                , showType t1
+                                , "\nequal to:"
+                                , showType t2
+                                , "\nin env:"
+                                , showEnv env
+                                , "\nresulting in:"
+                                , showEnv env1
+                                ]
+                                ( t, env1 )
                         )
+
+
+log : List String -> b -> b
+log strs =
+    Debug.log (unwords strs) ()
+        |> (always identity)
 
 
 {-| run setEqual, starting from the left, return the last type
@@ -341,7 +370,7 @@ setEqualAll : Nonempty Type -> ModEnv Type
 setEqualAll =
     Nonempty.map return
         >> Nonempty.foldl1
-            (\m1 m2 ->
+            (\m2 m1 ->
                 m1
                     |> andThenModEnv
                         (\t1 ->
@@ -367,57 +396,58 @@ inferComplete tData expr =
 infer : TypeData -> Expr -> ModEnv Type
 infer =
     let
-        unrollFuncTypes : Type -> Nonempty Type
+        unrollFuncTypes : Type -> ( Type, List Type )
         unrollFuncTypes =
-            Nonempty.reverse
-                << generateWrite
-                    (\t ->
-                        case t of
-                            FuncType a b ->
-                                ( Just b, a )
+            generateWrite
+                (\t ->
+                    case t of
+                        FuncType a b ->
+                            ( Just b, a )
 
-                            t_ ->
-                                ( Nothing, t_ )
-                    )
+                        t_ ->
+                            ( Nothing, t_ )
+                )
+                -- [note] currently in the form of:
+                -- paramType1 -> paramType2 -> paramType3 -> returnType
+                >> Nonempty.reverse
+                >> (\(Nonempty returnType reversedParams) ->
+                        ( returnType, List.reverse reversedParams )
+                   )
 
         rollToFuncTypes : Nonempty Type -> Type
         rollToFuncTypes =
             Nonempty.foldl1 (:>)
 
         handleFunc f args env =
-            case Dict.get f env of
-                Just t_ ->
-                    rewriteWithFreshTVars t_
-                        |> andThenModEnv
-                            (\t ->
-                                let
-                                    ( returnType, _ ) =
-                                        case unrollFuncTypes t of
-                                            Nonempty x xs ->
-                                                ( x, xs )
-                                in
-                                    -- lookup type signature for f
-                                    -- create a new return tv for each arg
-                                    -- match whole thing with type of f
-                                    Nonempty
-                                        (return returnType)
-                                        (List.map ((|>) env) <| List.reverse args)
-                                        |> Nonempty.toList
-                                        |> sequenceModEnvs
-                                        |> mapModEnv (toNonemptyUnsafe >> rollToFuncTypes)
-                                        |> andThenModEnv
-                                            (\x ->
-                                                unsafePrintEnv
-                                                    |> andThenModEnv (\_ -> return x)
-                                            )
-                                        |> andThenModEnv (setEqual t)
-                                        |> andThenModEnv (\_ -> unsafePrintEnv)
-                                        |> andThenModEnv (\_ -> return returnType)
-                            )
-
-                Nothing ->
-                    Debug.crash <|
-                        unwords [ "Cannot find type info for", f ]
+            lookupFreshTypeData env f
+                |> andThenModEnv
+                    (\t_ ->
+                        rewriteWithFreshTVars t_
+                            |> andThenModEnv
+                                (\t ->
+                                    let
+                                        ( returnType, _ ) =
+                                            unrollFuncTypes t
+                                    in
+                                        -- lookup type signature for f
+                                        -- create a new return tv for each arg
+                                        -- match whole thing with type of f
+                                        Nonempty
+                                            (return returnType)
+                                            (List.map ((|>) env) <| List.reverse args)
+                                            |> Nonempty.toList
+                                            |> sequenceModEnvs
+                                            |> mapModEnv (toNonemptyUnsafe >> rollToFuncTypes)
+                                            |> andThenModEnv
+                                                (\x ->
+                                                    unsafePrintEnv
+                                                        |> andThenModEnv (\_ -> return x)
+                                                )
+                                            |> andThenModEnv (setEqual t)
+                                            |> andThenModEnv (\_ -> unsafePrintEnv)
+                                            |> andThenModEnv (\_ -> return returnType)
+                                )
+                    )
 
         var n env =
             case Dict.get n env of
@@ -441,50 +471,47 @@ infer =
             handleFunc
 
         caseStmt e cases env =
-            let
-                cs =
-                    cases
-                        |> List.map ((|>) env)
-
-                -- [tofix] handle (error) case where there's no patterns!
-                -- probably change to Nonempty
-                patterns =
-                    cs |> List.map (mapModEnv Tuple.first)
-
-                rhss =
-                    cs |> List.map (mapModEnv Tuple.second)
-            in
-                Nonempty (e env) patterns
-                    |> Nonempty.toList
-                    |> sequenceModEnvs
-                    |> andThenModEnv (toNonemptyUnsafe >> setEqualAll)
-                    |> andThenModEnv
-                        (-- discard the type, as long as their types all match
-                         \_ ->
-                            -- now match the rhs, returning the (equal) type
-                            rhss
-                                |> sequenceModEnvs
-                                |> andThenModEnv (toNonemptyUnsafe >> setEqualAll)
-                        )
+            cases
+                |> Nonempty.map ((|>) env)
+                |> sequenceModEnvsNonempty
+                |> andThenModEnv
+                    (\cs ->
+                        let
+                            ( patterns, rhss ) =
+                                Nonempty.unzip cs
+                        in
+                            e env
+                                |> mapModEnv (flip (:::) patterns)
+                                |> andThenModEnv setEqualAll
+                                |> andThenModEnv
+                                    (-- discard the type, as long as their types all match
+                                     \_ ->
+                                        -- now match the rhs, returning the (equal) type
+                                        rhss |> setEqualAll
+                                    )
+                    )
 
         cb c params rhs env =
-            case Dict.get c env of
-                Just t ->
-                    let
-                        ( returnType, paramTypes ) =
-                            case unrollFuncTypes t of
-                                Nonempty x xs ->
-                                    ( x, xs )
+            lookupFreshTypeData env c
+                |> andThenModEnv
+                    (\t ->
+                        let
+                            ( returnType, paramTypes ) =
+                                unrollFuncTypes t
 
-                        extendedEnv =
-                            List.map2 ((,)) params paramTypes
-                                |> List.foldr (uncurry Dict.insert) env
-                    in
-                        map2ModEnv ((,)) (return t) (rhs extendedEnv)
-
-                Nothing ->
-                    Debug.crash <|
-                        unwords [ "Cannot find type info for", c ]
+                            extendedEnv =
+                                List.map2 ((,)) params paramTypes
+                                    |> List.foldr (uncurry Dict.insert) env
+                        in
+                            map2ModEnv ((,))
+                                (return returnType)
+                                (rhs extendedEnv
+                                    |> log
+                                        [ "in cb:"
+                                        , showTypeData extendedEnv
+                                        ]
+                                )
+                    )
     in
         flip <| Block.foldr var hole app lit constructor caseStmt cb
 
@@ -531,6 +558,10 @@ infixr 9 :>
 
 unwords =
     List.foldr (++) "" << List.intersperse " "
+
+
+unlines =
+    List.foldr (++) "" << List.intersperse "\n"
 
 
 bracket x =
@@ -618,6 +649,8 @@ ex14 =
         (singleton Block.emptyList)
 
 
+{-| should be list (list int)
+-}
 ex15 =
     append
         (singleton Block.range56)
@@ -627,14 +660,64 @@ ex15 =
         )
 
 
+{-| should be int
+-}
 ex16 =
     listCase Block.emptyList
         (Lit 1)
         (\_ _ -> Lit 1)
 
 
+{-| should be error
+-}
+ex17 =
+    listCase (singleton (Lit 1))
+        (Lit 1)
+        (\_ a -> a)
+
+
+{-| should be int
+-}
+ex18 =
+    listCase (singleton (Lit 1))
+        (Lit 1)
+        (\x _ -> x)
+
+
+{-| should be int
+-}
+ex19 =
+    listCase Block.emptyList
+        (Lit 1)
+        (\x _ -> x)
+
+
+{-| should be error
+-}
+ex20 =
+    listCase (Lit 2)
+        (Lit 1)
+        (\x _ -> x)
+
+
+{-| should be error
+-}
+ex21 =
+    listCase (singleton (Lit 2))
+        Block.emptyList
+        (\x _ -> x)
+
+
+{-| should be error
+-}
+ex22 =
+    listCase Block.range02
+        Block.emptyList
+        (\x _ -> x)
+
+
 ex =
-    ex16
+    ex22
 
 
 showEnv : TVarEnv -> String
@@ -644,9 +727,44 @@ showEnv (TVarEnv n dict) =
         , dict
             |> Dict.map (\n t -> showType (TypeVar n) ++ ":" ++ showType t)
             |> Dict.values
-            |> List.foldr (++) ""
+            |> List.intersperse ","
+            |> unwords
         , "}"
         ]
+
+
+showTypeData : TypeData -> String
+showTypeData tdata =
+    unlines
+        [ "{"
+        , tdata
+            |> Dict.map (\n t -> n ++ ":" ++ showType t)
+            |> Dict.values
+            |> unlines
+        , "}"
+        ]
+
+
+showErr : InferenceError -> String
+showErr err =
+    case err of
+        CannotSetEqualError t1 t2 env ->
+            unwords
+                [ "Cannot match type:"
+                , showType t1
+                , "with type:"
+                , showType t2
+                , ". The bindings are:"
+                , showEnv env
+                , "."
+                ]
+
+        MissingTypeInfo varname ->
+            unwords
+                [ "Missing type info for variable:"
+                , varname
+                , "."
+                ]
 
 
 main =
@@ -656,7 +774,7 @@ main =
                 unwords [ showType t ]
 
             Err e ->
-                toString e
+                showErr e
 
 
 append xs ys =
@@ -665,17 +783,20 @@ append xs ys =
 
 listCase : Expr -> Expr -> (Expr -> Expr -> Expr) -> Expr
 listCase e ifEmpty ifCons =
-    CaseStmt e
-        [ Block.Case Block.emptyListId [] ifEmpty
-        , let
-            head =
-                "head"
+    CaseStmt e <|
+        Nonempty
+            (Block.Case Block.emptyListId [] ifEmpty)
+            [ let
+                head =
+                    "head"
 
-            rest =
-                "rest"
-          in
-            Block.Case Block.consId [ head, rest ] (ifCons (Var head) (Var rest))
-        ]
+                rest =
+                    "rest"
+              in
+                Block.Case Block.consId
+                    [ head, rest ]
+                    (ifCons (Var head) (Var rest))
+            ]
 
 
 singleton a =
