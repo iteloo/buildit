@@ -1,8 +1,8 @@
 module TypeInfer exposing (..)
 
 import Block exposing (Expr(..))
+import Helper
 import Dict
-import Html exposing (text)
 import List.Nonempty as Nonempty exposing (Nonempty(..), (:::))
 
 
@@ -21,21 +21,31 @@ type Type
     | ParamType Name (List Type)
 
 
+infixr 9 :>
+(:>) =
+    FuncType
+
+
+int : Type
+int =
+    BaseType "int"
+
+
+
+-- Inference Environment (ModEnv)
+
+
+type alias ModEnv a =
+    TVarEnv -> Result InferenceError ( a, TVarEnv )
+
+
 type TVarEnv
     = TVarEnv Int (Dict.Dict Int Type)
-
-
-type alias TypeData =
-    Dict.Dict Name Type
 
 
 type InferenceError
     = CannotSetEqualError Type Type TVarEnv
     | MissingTypeInfo Name
-
-
-type alias ModEnv a =
-    TVarEnv -> Result InferenceError ( a, TVarEnv )
 
 
 getEnv : ModEnv TVarEnv
@@ -114,7 +124,7 @@ map2ModEnv f =
 
 unsafePrintEnv : ModEnv ()
 unsafePrintEnv =
-    \env -> Ok ( log [ showEnv env ] (), env )
+    \env -> Ok ( Helper.log [ showEnv env ] (), env )
 
 
 sequenceModEnvs : List (ModEnv a) -> ModEnv (List a)
@@ -124,7 +134,19 @@ sequenceModEnvs =
 
 sequenceModEnvsNonempty : Nonempty (ModEnv a) -> ModEnv (Nonempty a)
 sequenceModEnvsNonempty =
-    Block.nonemptyFoldr (map2ModEnv (:::)) (mapModEnv Nonempty.fromElement)
+    Helper.nonemptyFoldr (map2ModEnv (:::)) (mapModEnv Nonempty.fromElement)
+
+
+
+-- VARIABLE BINDING
+
+
+type alias TypeData =
+    Dict.Dict Name Type
+
+
+
+-- BASIC INFERNECE OPERATIONS
 
 
 lookupFreshTypeData : TypeData -> Name -> ModEnv Type
@@ -301,7 +323,7 @@ setEqual t1 t2 =
                                     \env ->
                                         if cont then
                                             Debug.crash <|
-                                                unwords
+                                                Helper.unwords
                                                     [ "Trying to set"
                                                     , showType (TypeVar n)
                                                     , "to"
@@ -344,24 +366,18 @@ setEqual t1 t2 =
                 go (getFirstNontrivial t1) (getFirstNontrivial t2) env
                     |> Result.map
                         (\( t, env1 ) ->
-                            log
-                                [ "setting:"
-                                , showType t1
-                                , "\nequal to:"
-                                , showType t2
-                                , "\nin env:"
-                                , showEnv env
-                                , "\nresulting in:"
-                                , showEnv env1
-                                ]
-                                ( t, env1 )
+                            -- Helper.log
+                            --     [ "setting:"
+                            --     , showType t1
+                            --     , "\nequal to:"
+                            --     , showType t2
+                            --     , "\nin env:"
+                            --     , showEnv env
+                            --     , "\nresulting in:"
+                            --     , showEnv env1
+                            --     ]
+                            ( t, env1 )
                         )
-
-
-log : List String -> b -> b
-log strs =
-    Debug.log (unwords strs) ()
-        |> (always identity)
 
 
 {-| run setEqual, starting from the left, return the last type
@@ -398,7 +414,7 @@ infer =
     let
         unrollFuncTypes : Type -> ( Type, List Type )
         unrollFuncTypes =
-            generateWrite
+            Helper.generateWrite
                 (\t ->
                     case t of
                         FuncType a b ->
@@ -435,16 +451,9 @@ infer =
                                         Nonempty
                                             (return returnType)
                                             (List.map ((|>) env) <| List.reverse args)
-                                            |> Nonempty.toList
-                                            |> sequenceModEnvs
-                                            |> mapModEnv (toNonemptyUnsafe >> rollToFuncTypes)
-                                            |> andThenModEnv
-                                                (\x ->
-                                                    unsafePrintEnv
-                                                        |> andThenModEnv (\_ -> return x)
-                                                )
+                                            |> sequenceModEnvsNonempty
+                                            |> mapModEnv rollToFuncTypes
                                             |> andThenModEnv (setEqual t)
-                                            |> andThenModEnv (\_ -> unsafePrintEnv)
                                             |> andThenModEnv (\_ -> return returnType)
                                 )
                     )
@@ -456,7 +465,7 @@ infer =
 
                 Nothing ->
                     Debug.crash <|
-                        unwords [ "Cannot find type info for", n ]
+                        Helper.unwords [ "Cannot find type info for", n ]
 
         hole n _ =
             newTVarM
@@ -506,10 +515,10 @@ infer =
                             map2ModEnv ((,))
                                 (return returnType)
                                 (rhs extendedEnv
-                                    |> log
-                                        [ "in cb:"
-                                        , showTypeData extendedEnv
-                                        ]
+                                 -- |> Helper.log
+                                 --     [ "in cb:"
+                                 --     , showTypeData extendedEnv
+                                 --     ]
                                 )
                     )
     in
@@ -517,55 +526,7 @@ infer =
 
 
 
--- EXEC
-
-
-int : Type
-int =
-    BaseType "int"
-
-
-list : Type -> Type
-list =
-    ParamType "list" << List.singleton
-
-
-either : Type -> Type -> Type
-either a b =
-    ParamType "either" [ a, b ]
-
-
-a =
-    TypeVar 1
-
-
-b =
-    TypeVar 2
-
-
-mapType =
-    FuncType (FuncType a b) (FuncType (list a) (list b))
-
-
-intMapType =
-    FuncType (FuncType int b) (FuncType (list int) (list b))
-
-
-infixr 9 :>
-(:>) =
-    FuncType
-
-
-unwords =
-    List.foldr (++) "" << List.intersperse " "
-
-
-unlines =
-    List.foldr (++) "" << List.intersperse "\n"
-
-
-bracket x =
-    "(" ++ x ++ ")"
+-- PRINTING
 
 
 showType : Type -> String
@@ -578,169 +539,33 @@ showType t =
             n
 
         ParamType f args ->
-            bracket <| unwords (f :: List.map showType args)
+            Helper.bracket <| Helper.unwords (f :: List.map showType args)
 
         FuncType t1 t2 ->
-            bracket <| unwords [ showType t1, "->", showType t2 ]
-
-
-ex1 =
-    setEqual mapType intMapType emptyEnv
-
-
-ex2 =
-    setEqual a b emptyEnv
-
-
-ex3 =
-    setEqual int b emptyEnv
-
-
-ex4 =
-    setEqual (list int) (list a) emptyEnv
-
-
-ex5 =
-    setEqual (int :> a) (b :> a) emptyEnv
-
-
-{-| should give no match
--}
-ex6 =
-    setEqual (either a a) (either int (list int)) emptyEnv
-
-
-ex7 =
-    add23
-
-
-ex8 =
-    Var addId
-
-
-ex9 =
-    Block.range02
-
-
-ex10 =
-    append Block.range02 Block.range56
-
-
-ex11 =
-    append Block.range56 ex10
-
-
-ex12 =
-    singleton (singleton (Lit 1))
-
-
-ex13 =
-    append
-        (singleton Block.range56)
-        (append
-            (singleton Block.range02)
-            (singleton Block.emptyList)
-        )
-
-
-ex14 =
-    append
-        Block.emptyList
-        (singleton Block.emptyList)
-
-
-{-| should be list (list int)
--}
-ex15 =
-    append
-        (singleton Block.range56)
-        (append
-            (singleton Block.range02)
-            (singleton Block.emptyList)
-        )
-
-
-{-| should be int
--}
-ex16 =
-    listCase Block.emptyList
-        (Lit 1)
-        (\_ _ -> Lit 1)
-
-
-{-| should be error
--}
-ex17 =
-    listCase (singleton (Lit 1))
-        (Lit 1)
-        (\_ a -> a)
-
-
-{-| should be int
--}
-ex18 =
-    listCase (singleton (Lit 1))
-        (Lit 1)
-        (\x _ -> x)
-
-
-{-| should be int
--}
-ex19 =
-    listCase Block.emptyList
-        (Lit 1)
-        (\x _ -> x)
-
-
-{-| should be error
--}
-ex20 =
-    listCase (Lit 2)
-        (Lit 1)
-        (\x _ -> x)
-
-
-{-| should be error
--}
-ex21 =
-    listCase (singleton (Lit 2))
-        Block.emptyList
-        (\x _ -> x)
-
-
-{-| should be error
--}
-ex22 =
-    listCase Block.range02
-        Block.emptyList
-        (\x _ -> x)
-
-
-ex =
-    ex22
+            Helper.bracket <| Helper.unwords [ showType t1, "->", showType t2 ]
 
 
 showEnv : TVarEnv -> String
 showEnv (TVarEnv n dict) =
-    unwords
+    Helper.unwords
         [ "{"
         , dict
             |> Dict.map (\n t -> showType (TypeVar n) ++ ":" ++ showType t)
             |> Dict.values
             |> List.intersperse ","
-            |> unwords
+            |> Helper.unwords
         , "}"
         ]
 
 
 showTypeData : TypeData -> String
 showTypeData tdata =
-    unlines
+    Helper.unlines
         [ "{"
         , tdata
             |> Dict.map (\n t -> n ++ ":" ++ showType t)
             |> Dict.values
-            |> unlines
+            |> Helper.unlines
         , "}"
         ]
 
@@ -749,7 +574,7 @@ showErr : InferenceError -> String
 showErr err =
     case err of
         CannotSetEqualError t1 t2 env ->
-            unwords
+            Helper.unwords
                 [ "Cannot match type:"
                 , showType t1
                 , "with type:"
@@ -760,117 +585,8 @@ showErr err =
                 ]
 
         MissingTypeInfo varname ->
-            unwords
+            Helper.unwords
                 [ "Missing type info for variable:"
                 , varname
                 , "."
                 ]
-
-
-main =
-    text <|
-        case inferComplete typeData ex of
-            Ok t ->
-                unwords [ showType t ]
-
-            Err e ->
-                showErr e
-
-
-append xs ys =
-    App Block.appendId [ xs, ys ]
-
-
-listCase : Expr -> Expr -> (Expr -> Expr -> Expr) -> Expr
-listCase e ifEmpty ifCons =
-    CaseStmt e <|
-        Nonempty
-            (Block.Case Block.emptyListId [] ifEmpty)
-            [ let
-                head =
-                    "head"
-
-                rest =
-                    "rest"
-              in
-                Block.Case Block.consId
-                    [ head, rest ]
-                    (ifCons (Var head) (Var rest))
-            ]
-
-
-singleton a =
-    Block.cons a Block.emptyList
-
-
-addId =
-    "add"
-
-
-reverseId =
-    "reverse"
-
-
-addHole : Expr
-addHole =
-    App addId [ Lit 1, Hole "y" ]
-
-
-add23 : Expr
-add23 =
-    App addId [ Lit 2, Lit 3 ]
-
-
-typeData : TypeData
-typeData =
-    Dict.fromList
-        [ ( addId, int :> int :> int )
-        , ( reverseId, list a :> list a )
-        , ( Block.consId, a :> list a :> list a )
-        , ( Block.emptyListId, list a )
-        , ( Block.appendId, list a :> list a :> list a )
-        , ( "map", mapType )
-        ]
-
-
-generateWrite : (a -> ( Maybe a, b )) -> a -> Nonempty b
-generateWrite gen =
-    let
-        go : List b -> a -> Nonempty b
-        go bs a =
-            case gen a of
-                ( Nothing, b ) ->
-                    Nonempty b bs
-
-                ( Just next, b ) ->
-                    go (b :: bs) next
-    in
-        Nonempty.reverse << go []
-
-
-generate : (a -> Maybe a) -> a -> Nonempty a
-generate gen =
-    let
-        go : List a -> a -> Nonempty a
-        go xs x =
-            case gen x of
-                Nothing ->
-                    Nonempty x xs
-
-                Just next ->
-                    go (x :: xs) next
-    in
-        Nonempty.reverse << go []
-
-
-toNonemptyUnsafe xs =
-    case Nonempty.fromList xs of
-        Just xs ->
-            xs
-
-        Nothing ->
-            Debug.crash <|
-                unwords
-                    [ "Cannot turn empty list"
-                    , "into nonempty list"
-                    ]

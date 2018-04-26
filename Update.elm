@@ -155,7 +155,7 @@ update msg model =
                 | eval =
                     model.draftExpr
                         |> Maybe.andThen
-                            (Block.reduceCallByValueSelectionAt idxs
+                            (Block.evalCBVAt idxs
                                 (mkGetDef model.defs)
                                 >> Zipper.fromList
                             )

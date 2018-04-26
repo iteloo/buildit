@@ -10,6 +10,7 @@ import Block
         , Expr(..)
         , Case(..)
         )
+import BlockExample
 import Helper
 import Html exposing (..)
 import Html.Attributes exposing (..)
@@ -18,6 +19,7 @@ import Json.Decode as Decode
 import Mouse
 import Dict
 import List.Zipper as Zipper exposing (Zipper)
+import List.Nonempty as Nonempty
 
 
 view model =
@@ -175,7 +177,7 @@ litView =
     blockView "orange"
         [ onMouseDown (DragStart LibLiteral)
         ]
-        [ typeView "orange" Block.int
+        [ typeView "orange" BlockExample.intId
         , div []
             [ input
                 [ disabled True
@@ -332,7 +334,7 @@ exprView getDef hoverIdxs dragIdxs =
                                         , hoverHighlight
                                         ]
                                     )
-                                    [ typeView "orange" Block.int
+                                    [ typeView "orange" BlockExample.intId
                                     , div []
                                         [ input
                                             [ value (toString lit)
@@ -407,7 +409,8 @@ exprView getDef hoverIdxs dragIdxs =
                                                                             rhs
                                                                         ]
                                                                 )
-                                                                cases
+                                                              <|
+                                                                Nonempty.toList cases
                                                             ]
                                                     ]
     in

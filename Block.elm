@@ -3,7 +3,7 @@ module Block
         ( Expr(..)
         , Case(..)
         , Indices
-        , Id
+        , Name
         , Def(..)
         , DefLhs(..)
         , DefContent(..)
@@ -14,23 +14,8 @@ module Block
         , setAt
         , removeAt
         , updateAt
-        , stepCallByName
-        , reduceCallByValueSelection
-        , reduceCallByValueSelectionAt
-        , consId
-        , emptyListId
-        , cons
-        , emptyList
-        , appendId
-        , testExpr
-        , int
-        , intlit
-        , string
-        , list
-        , add23
-        , range02
-        , range56
-        , nonemptyFoldr
+        , evalCBV
+        , evalCBVAt
         )
 
 import Helper
@@ -42,10 +27,6 @@ type alias Type =
     String
 
 
-type alias Id =
-    String
-
-
 type alias Name =
     String
 
@@ -53,7 +34,7 @@ type alias Name =
 type Expr
     = Var Name
     | Hole Name
-    | App Id (List Expr)
+    | App Name (List Expr)
     | Lit Int
     | Constructor Name (List Expr)
     | CaseStmt Expr (Nonempty Case)
@@ -67,77 +48,6 @@ type Case
 
 type alias Indices =
     List Int
-
-
-int : Type
-int =
-    "integer"
-
-
-intlit : Int -> Expr
-intlit num =
-    Lit num
-
-
-string : Type
-string =
-    "string"
-
-
-list : Type -> Type
-list typ =
-    "list of " ++ typ
-
-
-add23 : Expr
-add23 =
-    App "add" [ intlit 2, intlit 3 ]
-
-
-addHoles : Expr
-addHoles =
-    App "add" [ Hole "x", Hole "y" ]
-
-
-consId =
-    "Cons"
-
-
-emptyListId =
-    "[]"
-
-
-emptyList : Expr
-emptyList =
-    Constructor emptyListId []
-
-
-cons : Expr -> Expr -> Expr
-cons x y =
-    Constructor "Cons" [ x, y ]
-
-
-listExprFromListOfInt : List Int -> Expr
-listExprFromListOfInt =
-    List.foldr cons emptyList << List.map Lit
-
-
-range02 : Expr
-range02 =
-    listExprFromListOfInt (List.range 0 2)
-
-
-range56 =
-    listExprFromListOfInt (List.range 5 6)
-
-
-appendId =
-    "append"
-
-
-testExpr : Expr
-testExpr =
-    App appendId [ range02, Hole "a list" ]
 
 
 type DefLhs
@@ -154,10 +64,10 @@ type Def
 
 
 type alias GetDef a =
-    Id -> (Type -> List DefContent -> Expr -> a) -> a
+    Name -> (Type -> List DefContent -> Expr -> a) -> a
 
 
-defLhsToExpr : Id -> DefLhs -> Expr
+defLhsToExpr : Name -> DefLhs -> Expr
 defLhsToExpr f (DefLhs typ ctnts) =
     App f <|
         List.filterMap
@@ -175,7 +85,7 @@ defLhsToExpr f (DefLhs typ ctnts) =
 foldr :
     (Name -> s)
     -> (Name -> s)
-    -> (Id -> List s -> s)
+    -> (Name -> List s -> s)
     -> (Int -> s)
     -> (Name -> List s -> s)
     -> (s -> Nonempty t -> s)
@@ -214,7 +124,7 @@ foldr var hole app lit constructor caseStmt caseBranch e =
 indexedFoldr :
     (Indices -> Name -> s)
     -> (Indices -> Name -> s)
-    -> (Indices -> Id -> List s -> s)
+    -> (Indices -> Name -> List s -> s)
     -> (Indices -> Int -> s)
     -> (Indices -> Name -> List s -> s)
     -> (Indices -> s -> Nonempty t -> s)
@@ -275,7 +185,7 @@ exprAt =
                     case left of
                         [] ->
                             Maybe.map (App f) <|
-                                sequenceMaybes (List.map ((|>) []) args)
+                                Helper.sequenceMaybes (List.map ((|>) []) args)
 
                         idx :: idxs ->
                             args
@@ -289,7 +199,7 @@ exprAt =
                     case left of
                         [] ->
                             Maybe.map (Constructor c) <|
-                                sequenceMaybes (List.map ((|>) []) args)
+                                Helper.sequenceMaybes (List.map ((|>) []) args)
 
                         idx :: idxs ->
                             args
@@ -302,7 +212,7 @@ exprAt =
                     case left of
                         [] ->
                             Maybe.map2 CaseStmt (e []) <|
-                                sequenceMaybesNonempty
+                                Helper.sequenceMaybesNonempty
                                     (Nonempty.map ((|>) []) cases)
 
                         idx :: idxs ->
@@ -380,8 +290,8 @@ updateAt indices upd expr =
             expr
 
 
-stepCallByName : GetDef Expr -> Expr -> Expr
-stepCallByName getDef expr =
+stepCBN : GetDef Expr -> Expr -> Expr
+stepCBN getDef expr =
     case expr of
         Var name ->
             Var name
@@ -430,22 +340,23 @@ stepCallByName getDef expr =
             CaseStmt e cases
 
 
-reduceCallByValueSelection : GetDef Expr -> Expr -> List ( Expr, Indices )
-reduceCallByValueSelection getDef expr =
+evalCBV : GetDef Expr -> Expr -> List ( Expr, Indices )
+evalCBV getDef expr =
     Helper.generate
-        (Tuple.first >> stepCallByValueSelection getDef)
+        (Tuple.first >> stepCBV getDef)
         ( expr, [] )
+        |> Nonempty.toList
 
 
-reduceCallByValueSelectionAt :
+evalCBVAt :
     Indices
     -> GetDef Expr
     -> Expr
     -> List ( Expr, Indices )
-reduceCallByValueSelectionAt indices getDef expr =
+evalCBVAt indices getDef expr =
     case exprAt indices expr of
         Just e ->
-            reduceCallByValueSelection getDef e
+            evalCBV getDef e
                 |> List.map
                     (\( subExpr, subIdxs ) ->
                         ( setAt indices subExpr expr
@@ -461,8 +372,8 @@ type MatchErr
     = NotConstructorErr
 
 
-stepCallByValueSelection : GetDef Expr -> Expr -> Maybe ( Expr, Indices )
-stepCallByValueSelection getDef expr =
+stepCBV : GetDef Expr -> Expr -> Maybe ( Expr, Indices )
+stepCBV getDef expr =
     let
         var _ name =
             ( Nothing, Var name )
@@ -620,29 +531,3 @@ subst var val expr =
                     Nonempty.map
                         (\(Case c params rhs) -> Case c params (go rhs))
                         cases
-
-
-isJust : Maybe a -> Bool
-isJust m =
-    case m of
-        Just _ ->
-            True
-
-        Nothing ->
-            False
-
-
-sequenceMaybes : List (Maybe a) -> Maybe (List a)
-sequenceMaybes =
-    List.foldr (Maybe.map2 (::)) (Just [])
-
-
-sequenceMaybesNonempty : Nonempty (Maybe a) -> Maybe (Nonempty a)
-sequenceMaybesNonempty =
-    nonemptyFoldr (Maybe.map2 (:::)) (Maybe.map Nonempty.fromElement)
-
-
-nonemptyFoldr : (a -> b -> b) -> (a -> b) -> Nonempty a -> b
-nonemptyFoldr cons last =
-    Nonempty.reverse
-        >> (\(Nonempty x xs) -> List.foldl cons (last x) xs)
