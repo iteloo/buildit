@@ -1,12 +1,15 @@
 module Model exposing (..)
 
+import Expr
+    exposing
+        ( Expr(..)
+        , Case(..)
+        )
 import Block
     exposing
         ( Def(..)
-        , DefLhs(..)
-        , DefContent(..)
-        , Expr(..)
-        , Case(..)
+        , Block(..)
+        , BlkContent(..)
         )
 import BlockExample
 import Dict
@@ -16,16 +19,16 @@ import List.Zipper as Zipper exposing (Zipper)
 
 type alias Model =
     { dragging : Maybe Drag
-    , hover : Maybe Block.Indices
-    , defs : Dict.Dict Block.Name Def
+    , hover : Maybe Expr.Indices
+    , defs : Dict.Dict Expr.Name Def
     , draftExpr : Maybe Expr
     , eval : Maybe (Zipper EvalFrame)
     }
 
 
 type Item
-    = DraftItem Block.Indices
-    | LibItem Block.Name
+    = DraftItem Expr.Indices
+    | LibItem Expr.Name
     | LibLiteral
 
 
@@ -38,7 +41,7 @@ type alias Drag =
 
 
 type alias EvalFrame =
-    ( Expr, Block.Indices )
+    ( Expr, Expr.Indices )
 
 
 init =
@@ -55,10 +58,10 @@ init =
 -- HELPER
 
 
-mkGetDef : Dict.Dict Block.Name Def -> Block.GetDef a
+mkGetDef : Dict.Dict Expr.Name Def -> Block.GetDef a
 mkGetDef defs id handler =
     case Dict.get id defs of
-        Just (Def (DefLhs typ ctnts) rhs) ->
+        Just (Def (Block typ ctnts) rhs) ->
             handler typ ctnts rhs
 
         Nothing ->

@@ -6,6 +6,7 @@ module Update
 
 import Msg exposing (..)
 import Model exposing (..)
+import Expr
 import Block
 import Mouse
 import List.Zipper as Zipper exposing (Zipper)
@@ -30,13 +31,13 @@ update msg model =
             { model
                 | draftExpr =
                     Maybe.map
-                        (Block.updateAt idxs
+                        (Expr.updateAt idxs
                             (\e ->
                                 case e of
-                                    Block.Lit _ ->
+                                    Expr.Lit _ ->
                                         case String.toInt str of
                                             Ok x ->
-                                                Block.Lit x
+                                                Expr.Lit x
 
                                             Err _ ->
                                                 e
@@ -106,10 +107,10 @@ update msg model =
                                                 DraftItem dragIdxs ->
                                                     e
                                                         -- [note] must remove first!
-                                                        |> Block.removeAt dragIdxs
-                                                        |> (case Block.exprAt dragIdxs e of
+                                                        |> Expr.removeAt dragIdxs
+                                                        |> (case Expr.exprAt dragIdxs e of
                                                                 Just dragExpr ->
-                                                                    Block.setAt hoverIdxs dragExpr
+                                                                    Expr.setAt hoverIdxs dragExpr
 
                                                                 Nothing ->
                                                                     Debug.crash
@@ -120,18 +121,18 @@ update msg model =
 
                                                 LibItem f ->
                                                     e
-                                                        |> Block.setAt hoverIdxs
+                                                        |> Expr.setAt hoverIdxs
                                                             (mkGetDef model.defs
                                                                 f
                                                                 (\typ ctnts _ ->
                                                                     Block.defLhsToExpr f
-                                                                        (Block.DefLhs typ ctnts)
+                                                                        (Block.Block typ ctnts)
                                                                 )
                                                             )
 
                                                 LibLiteral ->
                                                     e
-                                                        |> Block.setAt hoverIdxs (Block.Lit 0)
+                                                        |> Expr.setAt hoverIdxs (Expr.Lit 0)
                                 )
 
                         _ ->

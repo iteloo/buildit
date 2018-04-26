@@ -1,7 +1,8 @@
 module BlockExample exposing (..)
 
-import Block exposing (..)
+import Expr exposing (..)
 import TypeInfer exposing (..)
+import Block exposing (..)
 import Helper
 import Dict
 import List.Nonempty exposing (Nonempty(..))
@@ -136,20 +137,12 @@ defs =
         ]
 
 
-intId =
-    "int"
-
-
-listId tstr =
-    Helper.unwords [ "list of", tstr ]
-
-
 addDef =
     Def
-        (DefLhs intId
-            [ DefVar intId "x"
-            , DefText "+"
-            , DefVar intId "y"
+        (Block int
+            [ BlkHole int "x"
+            , BlkText "+"
+            , BlkHole int "y"
             ]
         )
         -- [hack] bogus value
@@ -158,9 +151,9 @@ addDef =
 
 add1Def =
     Def
-        (DefLhs intId
-            [ DefVar intId "x"
-            , DefText "incremented by 1"
+        (Block int
+            [ BlkHole int "x"
+            , BlkText "incremented by 1"
             ]
         )
         (add (Var "x") (Lit 1))
@@ -173,15 +166,12 @@ appendDef =
 
         anotherList =
             "another list"
-
-        listofInt =
-            listId intId
     in
         Def
-            (DefLhs listofInt
-                [ DefVar listofInt aList
-                , DefText "followed by"
-                , DefVar listofInt anotherList
+            (Block (list int)
+                [ BlkHole (list int) aList
+                , BlkText "followed by"
+                , BlkHole (list int) anotherList
                 ]
             )
             (listCase (Var aList)

@@ -1,6 +1,6 @@
 module TypeInfer exposing (..)
 
-import Block exposing (Expr(..))
+import Expr exposing (..)
 import Helper
 import Dict
 import List.Nonempty as Nonempty exposing (Nonempty(..), (:::))
@@ -11,10 +11,6 @@ type Type
     | BaseType Name
     | FuncType Type Type
     | ParamType Name (List Type)
-
-
-type alias Name =
-    String
 
 
 type alias TVarName =
@@ -507,7 +503,7 @@ infer =
                                 )
                     )
     in
-        Block.foldr var hole app lit constructor caseStmt cb
+        Expr.foldr var hole app lit constructor caseStmt cb
 
 
 

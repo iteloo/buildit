@@ -2,13 +2,17 @@ module View exposing (view)
 
 import Msg exposing (..)
 import Model exposing (..)
+import Expr
+    exposing
+        ( Expr(..)
+        , Case(..)
+        )
+import TypeInfer
 import Block
     exposing
         ( Def(..)
-        , DefLhs(..)
-        , DefContent(..)
-        , Expr(..)
-        , Case(..)
+        , Block(..)
+        , BlkContent(..)
         )
 import BlockExample
 import Helper
@@ -48,7 +52,7 @@ view model =
                             DraftItem idxs ->
                                 case
                                     model.draftExpr
-                                        |> Maybe.andThen (Block.exprAt idxs)
+                                        |> Maybe.andThen (Expr.exprAt idxs)
                                 of
                                     Just e ->
                                         exprView (mkGetDef model.defs)
@@ -148,7 +152,7 @@ libView model =
         ]
 
 
-defView id (DefLhs typ ctnts) =
+defView id (Block typ ctnts) =
     blockView "green"
         [ onMouseDown (DragStart (LibItem id))
         ]
@@ -158,14 +162,14 @@ defView id (DefLhs typ ctnts) =
             List.map
                 (\defContent ->
                     (case defContent of
-                        DefVar typ name ->
+                        BlkHole typ name ->
                             blockView "grey"
                                 [ style [ ( "border-style", "dashed" ) ] ]
                                 [ typeView "grey" typ
                                 , text name
                                 ]
 
-                        DefText txt ->
+                        BlkText txt ->
                             blockView "white" [] [ text txt ]
                     )
                 )
@@ -177,7 +181,7 @@ litView =
     blockView "orange"
         [ onMouseDown (DragStart LibLiteral)
         ]
-        [ typeView "orange" BlockExample.intId
+        [ typeView "orange" TypeInfer.int
         , div []
             [ input
                 [ disabled True
@@ -190,13 +194,13 @@ litView =
 
 exprView :
     Block.GetDef (Html Msg)
-    -> Maybe Block.Indices
-    -> Maybe Block.Indices
+    -> Maybe Expr.Indices
+    -> Maybe Expr.Indices
     -> Expr
     -> Html Msg
 exprView getDef hoverIdxs dragIdxs =
     let
-        go : Block.Indices -> Expr -> Html Msg
+        go : Expr.Indices -> Expr -> Html Msg
         go idxs e =
             let
                 dragStart =
@@ -293,7 +297,7 @@ exprView getDef hoverIdxs dragIdxs =
                                                         List.foldl
                                                             (\defContent ( content, ( args, idx ) ) ->
                                                                 (case defContent of
-                                                                    DefVar _ _ ->
+                                                                    BlkHole _ _ ->
                                                                         case args of
                                                                             arg :: ags ->
                                                                                 ( holeView "green"
@@ -312,7 +316,7 @@ exprView getDef hoverIdxs dragIdxs =
                                                                                         ++ "Not enough arguments"
                                                                                     )
 
-                                                                    DefText txt ->
+                                                                    BlkText txt ->
                                                                         ( blockView "white"
                                                                             []
                                                                             [ text txt ]
@@ -334,7 +338,7 @@ exprView getDef hoverIdxs dragIdxs =
                                         , hoverHighlight
                                         ]
                                     )
-                                    [ typeView "orange" BlockExample.intId
+                                    [ typeView "orange" TypeInfer.int
                                     , div []
                                         [ input
                                             [ value (toString lit)
@@ -457,7 +461,7 @@ typeView color typ =
             , ( "font-size", "x-small" )
             ]
         ]
-        [ text typ ]
+        [ text (TypeInfer.showType typ) ]
 
 
 playbackView : Block.GetDef (Html Msg) -> Zipper EvalFrame -> Html Msg
