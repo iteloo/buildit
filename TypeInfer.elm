@@ -6,19 +6,19 @@ import Dict
 import List.Nonempty as Nonempty exposing (Nonempty(..), (:::))
 
 
+type Type
+    = TypeVar TVarName
+    | BaseType Name
+    | FuncType Type Type
+    | ParamType Name (List Type)
+
+
 type alias Name =
     String
 
 
 type alias TVarName =
     Int
-
-
-type Type
-    = TypeVar TVarName
-    | BaseType Name
-    | FuncType Type Type
-    | ParamType Name (List Type)
 
 
 infixr 9 :>
@@ -32,15 +32,23 @@ int =
 
 
 
--- Inference Environment (ModEnv)
+-- Inference Environment (IE)
 
 
-type alias ModEnv a =
-    TVarEnv -> Result InferenceError ( a, TVarEnv )
+type alias IE a =
+    TypeData -> TVarEnv -> Result InferenceError ( a, TVarEnv )
+
+
+type alias TypeData =
+    Dict.Dict Name Type
 
 
 type TVarEnv
-    = TVarEnv Int (Dict.Dict Int Type)
+    = TVarEnv
+        -- nextTVarName
+        TVarName
+        -- constraints
+        (Dict.Dict TVarName Type)
 
 
 type InferenceError
@@ -48,14 +56,14 @@ type InferenceError
     | MissingTypeInfo Name
 
 
-getEnv : ModEnv TVarEnv
+emptyEnv : TVarEnv
+emptyEnv =
+    TVarEnv 0 Dict.empty
+
+
+getEnv : IE TVarEnv
 getEnv =
-    \env -> Ok ( env, env )
-
-
-newTVarM : ModEnv Type
-newTVarM =
-    Ok << newTVar
+    \_ env -> Ok ( env, env )
 
 
 newTVar : TVarEnv -> ( Type, TVarEnv )
@@ -63,9 +71,9 @@ newTVar (TVarEnv n d) =
     ( TypeVar n, TVarEnv (n + 1) d )
 
 
-emptyEnv : TVarEnv
-emptyEnv =
-    TVarEnv 0 Dict.empty
+newTVarM : IE Type
+newTVarM =
+    \_ env -> Ok (newTVar env)
 
 
 lookupTVar : TVarEnv -> TVarName -> Maybe Type
@@ -78,85 +86,108 @@ envExtend ( n, t ) (TVarEnv cur dict) =
     TVarEnv cur (Dict.insert n t dict)
 
 
-envExtendM : ( TVarName, Type ) -> ModEnv ()
+envExtendM : ( TVarName, Type ) -> IE ()
 envExtendM binding =
-    envExtend binding >> return ()
+    \_ env -> Ok ( (), envExtend binding env )
 
 
-return : a -> ModEnv a
-return =
-    curry Ok
+return : a -> IE a
+return a =
+    \_ env -> Ok ( a, env )
 
 
-fail : InferenceError -> ModEnv a
-fail err _ =
-    Err err
+fail : InferenceError -> IE a
+fail err =
+    \_ _ -> Err err
 
 
-failCannotSetEqualError : Type -> Type -> ModEnv ()
+failCannotSetEqualError : Type -> Type -> IE a
 failCannotSetEqualError t1 t2 =
-    getEnv |> andThenModEnv (\env -> fail (CannotSetEqualError t1 t2 env))
+    getEnv |> andThenIE (\env -> fail (CannotSetEqualError t1 t2 env))
 
 
-andThenModEnv : (a -> ModEnv b) -> ModEnv a -> ModEnv b
-andThenModEnv f ma =
-    ma >> Result.andThen (uncurry f)
+andThenIE : (a -> IE b) -> IE a -> IE b
+andThenIE f ma =
+    \tdata env ->
+        ma tdata env
+            |> Result.andThen (\( a, env1 ) -> f a tdata env1)
 
 
-apModEnv : ModEnv (a -> b) -> ModEnv a -> ModEnv b
-apModEnv mf ma =
-    mf
-        |> andThenModEnv
-            (\f ->
-                ma |> andThenModEnv (f >> return)
+batchIE : IE (IE a) -> IE a
+batchIE mma =
+    mma |> andThenIE identity
+
+
+apIE : IE (a -> b) -> IE a -> IE b
+apIE mf ma =
+    mf |> andThenIE (\f -> ma |> andThenIE (f >> return))
+
+
+mapIE : (a -> b) -> IE a -> IE b
+mapIE f =
+    andThenIE (return << f)
+
+
+map2IE : (a -> b -> c) -> IE a -> IE b -> IE c
+map2IE f =
+    apIE << mapIE f
+
+
+unsafePrintEnv : IE ()
+unsafePrintEnv =
+    getEnv |> andThenIE (\env -> return (Helper.log [ showEnv env ] ()))
+
+
+sequenceIEs : List (IE a) -> IE (List a)
+sequenceIEs =
+    List.foldr (map2IE (::)) (return [])
+
+
+sequenceIEsNonempty : Nonempty (IE a) -> IE (Nonempty a)
+sequenceIEsNonempty =
+    Helper.nonemptyFoldr (map2IE (:::)) (mapIE Nonempty.fromElement)
+
+
+
+-- TYPE DATA OPERATIONS
+
+
+getTData : IE TypeData
+getTData =
+    \tdata env -> Ok ( tdata, env )
+
+
+lookupTypeData : Name -> IE Type
+lookupTypeData varname =
+    getTData
+        |> andThenIE
+            (\tdata ->
+                case Dict.get varname tdata of
+                    Just t ->
+                        return t
+
+                    Nothing ->
+                        fail (MissingTypeInfo varname)
             )
 
 
-mapModEnv : (a -> b) -> ModEnv a -> ModEnv b
-mapModEnv f =
-    andThenModEnv (return << f)
+lookupFreshTypeData : Name -> IE Type
+lookupFreshTypeData =
+    lookupTypeData >> andThenIE rewriteWithFreshTVars
 
 
-map2ModEnv : (a -> b -> c) -> ModEnv a -> ModEnv b -> ModEnv c
-map2ModEnv f =
-    apModEnv << mapModEnv f
+runWithTypeDataExt : Name -> Type -> IE a -> IE a
+runWithTypeDataExt n t =
+    (>>) (Dict.insert n t)
 
 
-unsafePrintEnv : ModEnv ()
-unsafePrintEnv =
-    \env -> Ok ( Helper.log [ showEnv env ] (), env )
-
-
-sequenceModEnvs : List (ModEnv a) -> ModEnv (List a)
-sequenceModEnvs =
-    List.foldr (map2ModEnv (::)) (return [])
-
-
-sequenceModEnvsNonempty : Nonempty (ModEnv a) -> ModEnv (Nonempty a)
-sequenceModEnvsNonempty =
-    Helper.nonemptyFoldr (map2ModEnv (:::)) (mapModEnv Nonempty.fromElement)
-
-
-
--- VARIABLE BINDING
-
-
-type alias TypeData =
-    Dict.Dict Name Type
+runWithTypeDataExts : List ( Name, Type ) -> IE a -> IE a
+runWithTypeDataExts =
+    flip <| List.foldr (uncurry runWithTypeDataExt)
 
 
 
 -- BASIC INFERNECE OPERATIONS
-
-
-lookupFreshTypeData : TypeData -> Name -> ModEnv Type
-lookupFreshTypeData tdata varname =
-    case Dict.get varname tdata of
-        Just t ->
-            rewriteWithFreshTVars t
-
-        Nothing ->
-            fail (MissingTypeInfo varname)
 
 
 applyConstraints : TVarEnv -> Type -> Type
@@ -180,9 +211,9 @@ applyConstraints env typ =
             ParamType f (List.map (applyConstraints env) typs)
 
 
-applyConstraintsM : Type -> ModEnv Type
+applyConstraintsM : Type -> IE Type
 applyConstraintsM typ =
-    \env -> Ok ( applyConstraints env typ, env )
+    getEnv |> andThenIE (\env -> return (applyConstraints env typ))
 
 
 allTVars : Type -> List TVarName
@@ -206,19 +237,19 @@ allTVars =
         go []
 
 
-rewriteWithFreshTVars : Type -> ModEnv Type
+rewriteWithFreshTVars : Type -> IE Type
 rewriteWithFreshTVars t =
     allTVars t
         |> List.map
             (\n ->
                 newTVarM
-                    |> andThenModEnv
+                    |> andThenIE
                         (\new ->
                             return ( n, new )
                         )
             )
-        |> sequenceModEnvs
-        |> andThenModEnv
+        |> sequenceIEs
+        |> andThenIE
             (\subs ->
                 return
                     (applyConstraints
@@ -236,11 +267,11 @@ rewriteWithFreshTVars t =
 {-| match the typevars in the two type expressions, and
 extend the tvar environment with new constraints
 -}
-setEqual : Type -> Type -> ModEnv ()
+setEqual : Type -> Type -> IE Type
 setEqual t1 t2 =
     let
         -- Assume type var inputs are free
-        go : Type -> Type -> ModEnv ()
+        go : Type -> Type -> IE Type
         go t1 t2 =
             case ( t1, t2 ) of
                 -- Assumes TypeVar n is free
@@ -251,43 +282,42 @@ setEqual t1 t2 =
                 ( t, TypeVar n ) ->
                     setEqualTVar n t
 
-                ( BaseType p, BaseType t ) ->
-                    if p == t then
-                        return ()
+                ( BaseType n1, BaseType n2 ) ->
+                    if n1 == n2 then
+                        return (BaseType n1)
                     else
                         failCannotSetEqualError t1 t2
 
                 ( FuncType ta1 tb1, FuncType ta2 tb2 ) ->
-                    -- compare return types first
-                    go tb1 tb2
-                        |> andThenModEnv
-                            (\_ ->
-                                go ta1 ta2
-                            )
+                    -- [note] by choice of order in map2IE
+                    -- this compares arg first
+                    -- [q] Should we compare return types first?
+                    map2IE (:>) (go ta1 ta2) (go tb1 tb2)
 
                 ( ParamType f1 targs1, ParamType f2 targs2 ) ->
                     if f1 == f2 then
-                        mapModEnv (always ()) <|
-                            sequenceModEnvs <|
-                                List.map2 setEqual targs1 targs2
+                        List.map2 setEqual targs1 targs2
+                            |> sequenceIEs
+                            |> mapIE (ParamType f1)
                     else
                         failCannotSetEqualError t1 t2
 
                 _ ->
                     failCannotSetEqualError t1 t2
 
-        setEqualTVar : TVarName -> Type -> ModEnv ()
+        setEqualTVar : TVarName -> Type -> IE Type
         setEqualTVar n t =
             case t of
                 TypeVar n_ ->
                     if n == n_ then
                         -- leave out trivial reflexivity a = a
-                        return ()
+                        return (TypeVar n)
                     else
                         envExtendM ( n, TypeVar n_ )
+                            |> andThenIE (\() -> return (TypeVar n))
 
                 -- Non-typevar case
-                t_ ->
+                t ->
                     let
                         contains : TVarEnv -> TVarName -> Type -> Bool
                         contains env n t =
@@ -313,41 +343,47 @@ setEqual t1 t2 =
                             in
                                 go t
 
-                        containsM : TVarName -> Type -> ModEnv Bool
+                        containsM : TVarName -> Type -> IE Bool
                         containsM n t =
-                            \env -> Ok ( contains env n t, env )
+                            getEnv
+                                |> andThenIE (\env -> return (contains env n t))
                     in
-                        containsM n t_
-                            |> andThenModEnv
+                        containsM n t
+                            |> andThenIE
                                 (\cont ->
-                                    \env ->
-                                        if cont then
-                                            Debug.crash <|
-                                                Helper.unwords
-                                                    [ "Trying to set"
-                                                    , showType (TypeVar n)
-                                                    , "to"
-                                                    , showType t_
-                                                    , ", but the latter"
-                                                    , "contains the former"
-                                                    , "in env"
-                                                    , showEnv env
-                                                    ]
-                                        else
-                                            {- [note] important to subsitute first
-                                               Otherwise we might end up with
-                                               constraints like a=list a
-                                            -}
-                                            (applyConstraintsM t_
-                                                |> andThenModEnv
-                                                    (\t__ ->
-                                                        envExtendM ( n, t__ )
-                                                    )
-                                            )
-                                                env
+                                    if cont then
+                                        getEnv
+                                            |> andThenIE
+                                                (\env ->
+                                                    Debug.crash <|
+                                                        Helper.unwords
+                                                            [ "Trying to set"
+                                                            , showType (TypeVar n)
+                                                            , "to"
+                                                            , showType t
+                                                            , ", but the latter"
+                                                            , "contains the former"
+                                                            , "in env"
+                                                            , showEnv env
+                                                            ]
+                                                )
+                                    else
+                                        {- [note] important to subsitute first
+                                           Otherwise we might end up with
+                                           constraints like a=list a
+                                        -}
+                                        applyConstraintsM t
+                                            |> andThenIE
+                                                (\t_ ->
+                                                    envExtendM ( n, t_ )
+                                                        |> andThenIE
+                                                            (\() ->
+                                                                return (TypeVar n)
+                                                            )
+                                                )
                                 )
     in
-        \env ->
+        \tdata env ->
             let
                 getFirstNontrivial : Type -> Type
                 getFirstNontrivial t =
@@ -363,7 +399,7 @@ setEqual t1 t2 =
                         _ ->
                             t
             in
-                go (getFirstNontrivial t1) (getFirstNontrivial t2) env
+                go (getFirstNontrivial t1) (getFirstNontrivial t2) tdata env
                     |> Result.map
                         (\( t, env1 ) ->
                             -- Helper.log
@@ -382,147 +418,96 @@ setEqual t1 t2 =
 
 {-| run setEqual, starting from the left, return the last type
 -}
-setEqualAll : Nonempty Type -> ModEnv Type
+setEqualAll : Nonempty Type -> IE Type
 setEqualAll =
     Nonempty.map return
-        >> Nonempty.foldl1
-            (\m2 m1 ->
-                m1
-                    |> andThenModEnv
-                        (\t1 ->
-                            m2
-                                |> andThenModEnv
-                                    (\t2 ->
-                                        setEqual t1 t2
-                                            |> andThenModEnv
-                                                (\_ ->
-                                                    return t2
-                                                )
-                                    )
-                        )
-            )
+        >> Nonempty.foldl1 (\m2 m1 -> map2IE setEqual m1 m2 |> batchIE)
 
 
-inferComplete : TypeData -> Expr -> Result InferenceError Type
-inferComplete tData expr =
-    infer tData expr emptyEnv
+
+-- MAIN INFERENCE
+
+
+inferFull : TypeData -> Expr -> Result InferenceError Type
+inferFull tData expr =
+    infer expr tData emptyEnv
         |> Result.map (uncurry (flip applyConstraints))
 
 
-infer : TypeData -> Expr -> ModEnv Type
+infer : Expr -> IE Type
 infer =
     let
-        unrollFuncTypes : Type -> ( Type, List Type )
-        unrollFuncTypes =
-            Helper.generateWrite
-                (\t ->
-                    case t of
-                        FuncType a b ->
-                            ( Just b, a )
-
-                        t_ ->
-                            ( Nothing, t_ )
-                )
-                -- [note] currently in the form of:
-                -- paramType1 -> paramType2 -> paramType3 -> returnType
-                >> Nonempty.reverse
-                >> (\(Nonempty returnType reversedParams) ->
-                        ( returnType, List.reverse reversedParams )
-                   )
-
-        rollToFuncTypes : Nonempty Type -> Type
-        rollToFuncTypes =
-            Nonempty.foldl1 (:>)
-
-        handleFunc f args env =
-            lookupFreshTypeData env f
-                |> andThenModEnv
-                    (\t_ ->
-                        rewriteWithFreshTVars t_
-                            |> andThenModEnv
-                                (\t ->
-                                    let
-                                        ( returnType, _ ) =
-                                            unrollFuncTypes t
-                                    in
-                                        -- lookup type signature for f
-                                        -- create a new return tv for each arg
-                                        -- match whole thing with type of f
-                                        Nonempty
-                                            (return returnType)
-                                            (List.map ((|>) env) <| List.reverse args)
-                                            |> sequenceModEnvsNonempty
-                                            |> mapModEnv rollToFuncTypes
-                                            |> andThenModEnv (setEqual t)
-                                            |> andThenModEnv (\_ -> return returnType)
-                                )
+        handleApp f args =
+            lookupFreshTypeData f
+                |> andThenIE
+                    (\t ->
+                        let
+                            ( returnType, _ ) =
+                                unrollFuncTypes t
+                        in
+                            Nonempty
+                                (return returnType)
+                                (List.reverse args)
+                                |> sequenceIEsNonempty
+                                |> mapIE rollToFuncTypes
+                                |> andThenIE (setEqual t)
+                                |> andThenIE (\_ -> return returnType)
                     )
 
-        var n env =
-            case Dict.get n env of
-                Just t ->
-                    return t
+        var n =
+            lookupTypeData n
 
-                Nothing ->
-                    Debug.crash <|
-                        Helper.unwords [ "Cannot find type info for", n ]
-
-        hole n _ =
+        hole n =
             newTVarM
 
         app =
-            handleFunc
+            handleApp
 
-        lit _ env =
+        lit _ =
             return int
 
         constructor =
-            handleFunc
+            handleApp
 
-        caseStmt e cases env =
+        caseStmt e cases =
             cases
-                |> Nonempty.map ((|>) env)
-                |> sequenceModEnvsNonempty
-                |> andThenModEnv
+                |> sequenceIEsNonempty
+                |> andThenIE
                     (\cs ->
                         let
                             ( patterns, rhss ) =
                                 Nonempty.unzip cs
                         in
-                            e env
-                                |> mapModEnv (flip (:::) patterns)
-                                |> andThenModEnv setEqualAll
-                                |> andThenModEnv
-                                    (-- discard the type, as long as their types all match
+                            -- first match the matched expr with the patterns
+                            e
+                                |> mapIE (flip (:::) patterns)
+                                |> andThenIE setEqualAll
+                                |> andThenIE
+                                    (-- discard the type,
+                                     -- as long as their types all match
                                      \_ ->
-                                        -- now match the rhs, returning the (equal) type
+                                        -- next match the rhss, returning the (equal) type
                                         rhss |> setEqualAll
                                     )
                     )
 
-        cb c params rhs env =
-            lookupFreshTypeData env c
-                |> andThenModEnv
+        cb c params rhs =
+            lookupFreshTypeData c
+                |> andThenIE
                     (\t ->
                         let
                             ( returnType, paramTypes ) =
                                 unrollFuncTypes t
-
-                            extendedEnv =
-                                List.map2 ((,)) params paramTypes
-                                    |> List.foldr (uncurry Dict.insert) env
                         in
-                            map2ModEnv ((,))
+                            map2IE ((,))
                                 (return returnType)
-                                (rhs extendedEnv
-                                 -- |> Helper.log
-                                 --     [ "in cb:"
-                                 --     , showTypeData extendedEnv
-                                 --     ]
+                                (rhs
+                                    |> runWithTypeDataExts
+                                        (List.map2 ((,)) params paramTypes)
                                 )
                     )
     in
-        flip <| Block.foldr var hole app lit constructor caseStmt cb
+        Block.foldr var hole app lit constructor caseStmt cb
 
 
 
@@ -590,3 +575,31 @@ showErr err =
                 , varname
                 , "."
                 ]
+
+
+
+-- HELPERS
+
+
+unrollFuncTypes : Type -> ( Type, List Type )
+unrollFuncTypes =
+    Helper.generateWrite
+        (\t ->
+            case t of
+                FuncType a b ->
+                    ( Just b, a )
+
+                t_ ->
+                    ( Nothing, t_ )
+        )
+        -- [note] currently in the form of:
+        -- paramType1 -> paramType2 -> paramType3 -> returnType
+        >> Nonempty.reverse
+        >> (\(Nonempty returnType reversedParams) ->
+                ( returnType, List.reverse reversedParams )
+           )
+
+
+rollToFuncTypes : Nonempty Type -> Type
+rollToFuncTypes =
+    Nonempty.foldl1 (:>)
