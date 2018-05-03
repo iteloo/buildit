@@ -81,8 +81,8 @@ stepCBN getDef expr =
                             List.map2 ((,)) params args
                     )
 
-        Lit lit ->
-            Lit lit
+        Lit x ->
+            Lit x
 
         Constructor name args ->
             Constructor name args

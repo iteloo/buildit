@@ -2,7 +2,6 @@ module Expr exposing (..)
 
 import List.Nonempty as Nonempty exposing (Nonempty(..), (:::))
 import Helper
-import Dict
 
 
 -- EXPR
@@ -21,10 +20,51 @@ type Expr
     | CaseStmt Expr (Nonempty Case)
 
 
-{-| Case constructor args rhs
--}
 type Case
     = Case Name (List Name) Expr
+
+
+
+-- ORNAMENTED VERSION
+
+
+type ExprA a
+    = VarA a Name
+    | HoleA a Name
+    | AppA a Name (List (ExprA a))
+    | LitA a Int
+    | ConstructorA a Name (List (ExprA a))
+    | CaseStmtA a (ExprA a) (Nonempty (CaseA a))
+
+
+toExpr : ExprA a -> Expr
+toExpr =
+    foldrA
+        (always Var)
+        (always Hole)
+        (always App)
+        (always Lit)
+        (always Constructor)
+        (always CaseStmt)
+        Case
+
+
+toExprA : Expr -> ExprA ()
+toExprA =
+    foldr
+        (VarA ())
+        (HoleA ())
+        (AppA ())
+        (LitA ())
+        (ConstructorA ())
+        (CaseStmtA ())
+        CaseA
+
+
+{-| Case constructor args rhs
+-}
+type CaseA a
+    = CaseA Name (List Name) (ExprA a)
 
 
 type alias Indices =
@@ -33,6 +73,46 @@ type alias Indices =
 
 
 -- EVALS
+
+
+foldrA :
+    (a -> Name -> s)
+    -> (a -> Name -> s)
+    -> (a -> Name -> List s -> s)
+    -> (a -> Int -> s)
+    -> (a -> Name -> List s -> s)
+    -> (a -> s -> Nonempty t -> s)
+    -> (Name -> List Name -> s -> t)
+    -> ExprA a
+    -> s
+foldrA var hole app lit constructor caseStmt caseBranch e =
+    let
+        go =
+            foldrA var hole app lit constructor caseStmt caseBranch
+    in
+        case e of
+            VarA a name ->
+                var a name
+
+            HoleA a name ->
+                hole a name
+
+            AppA a f args ->
+                app a f (List.map go args)
+
+            LitA a x ->
+                lit a x
+
+            ConstructorA a name args ->
+                constructor a name (List.map go args)
+
+            CaseStmtA a e cases ->
+                caseStmt a
+                    (go e)
+                    (Nonempty.map
+                        (\(CaseA c args rhs) -> caseBranch c args (go rhs))
+                        cases
+                    )
 
 
 foldr :
@@ -45,12 +125,13 @@ foldr :
     -> (Name -> List Name -> s -> t)
     -> Expr
     -> s
-foldr var hole app lit constructor caseStmt caseBranch e =
+foldr var hole app lit constructor caseStmt caseBranch expr =
+    -- [note] cannot call toExpr (will result in infinite recursion)
     let
         go =
             foldr var hole app lit constructor caseStmt caseBranch
     in
-        case e of
+        case expr of
             Var name ->
                 var name
 
@@ -67,11 +148,60 @@ foldr var hole app lit constructor caseStmt caseBranch e =
                 constructor name (List.map go args)
 
             CaseStmt e cases ->
-                caseStmt (go e)
+                caseStmt
+                    (go e)
                     (Nonempty.map
                         (\(Case c args rhs) -> caseBranch c args (go rhs))
                         cases
                     )
+
+
+indexedFoldrA :
+    (Indices -> a -> Name -> s)
+    -> (Indices -> a -> Name -> s)
+    -> (Indices -> a -> Name -> List s -> s)
+    -> (Indices -> a -> Int -> s)
+    -> (Indices -> a -> Name -> List s -> s)
+    -> (Indices -> a -> s -> Nonempty t -> s)
+    -> (Name -> List Name -> s -> t)
+    -> ExprA a
+    -> s
+indexedFoldrA var hole app lit constructor caseStmt caseBranch =
+    flip
+        (foldrA
+            (\a name idxs -> var idxs a name)
+            (\a name idxs -> hole idxs a name)
+            (\a f args idxs ->
+                app idxs
+                    a
+                    f
+                    (List.indexedMap
+                        (\idx -> (|>) (idxs ++ [ idx ]))
+                        args
+                    )
+            )
+            (\a x idxs -> lit idxs a x)
+            (\a c args idxs ->
+                constructor idxs
+                    a
+                    c
+                    (List.indexedMap
+                        (\idx -> (|>) (idxs ++ [ idx ]))
+                        args
+                    )
+            )
+            (\a e cases idxs ->
+                caseStmt idxs
+                    a
+                    (e (idxs ++ [ 0 ]))
+                    (Nonempty.indexedMap
+                        (\idx -> (|>) (idxs ++ [ idx + 1 ]))
+                        cases
+                    )
+            )
+            (\c params rhs idxs -> caseBranch c params (rhs idxs))
+        )
+        []
 
 
 indexedFoldr :
@@ -84,43 +214,20 @@ indexedFoldr :
     -> (Name -> List Name -> s -> t)
     -> Expr
     -> s
-indexedFoldr var hole app lit constructor caseStmt caseBranch =
-    flip
-        (foldr
-            (flip var)
-            (flip hole)
-            (\f args idxs ->
-                app idxs
-                    f
-                    (List.indexedMap
-                        (\idx -> (|>) (idxs ++ [ idx ]))
-                        args
-                    )
-            )
-            (flip lit)
-            (\c args idxs ->
-                constructor idxs
-                    c
-                    (List.indexedMap
-                        (\idx -> (|>) (idxs ++ [ idx ]))
-                        args
-                    )
-            )
-            (\e cases idxs ->
-                caseStmt idxs
-                    (e (idxs ++ [ 0 ]))
-                    (Nonempty.indexedMap
-                        (\idx -> (|>) (idxs ++ [ idx + 1 ]))
-                        cases
-                    )
-            )
-            (\c params rhs idxs -> caseBranch c params (rhs idxs))
-        )
-        []
+indexedFoldr var hole app lit constructor caseStmt caseBranch expr =
+    indexedFoldrA
+        (always << var)
+        (always << hole)
+        (always << app)
+        (always << lit)
+        (always << constructor)
+        (always << caseStmt)
+        caseBranch
+        (toExprA expr)
 
 
-exprAt : Indices -> Expr -> Maybe Expr
-exprAt =
+exprAtA : Indices -> ExprA a -> Maybe (ExprA a)
+exprAtA =
     let
         end v left =
             case left of
@@ -131,13 +238,13 @@ exprAt =
                     Nothing
     in
         flip
-            (foldr
-                (end << Var)
-                (end << Hole)
-                (\f args left ->
+            (foldrA
+                (\a n -> end <| VarA a n)
+                (\a n -> end <| HoleA a n)
+                (\a f args left ->
                     case left of
                         [] ->
-                            Maybe.map (App f) <|
+                            Maybe.map (AppA a f) <|
                                 Helper.sequenceMaybes (List.map ((|>) []) args)
 
                         idx :: idxs ->
@@ -147,11 +254,11 @@ exprAt =
                                 |> List.head
                                 |> Maybe.andThen identity
                 )
-                (end << Lit)
-                (\c args left ->
+                (\a x -> end <| LitA a x)
+                (\a c args left ->
                     case left of
                         [] ->
-                            Maybe.map (Constructor c) <|
+                            Maybe.map (ConstructorA a c) <|
                                 Helper.sequenceMaybes (List.map ((|>) []) args)
 
                         idx :: idxs ->
@@ -161,17 +268,17 @@ exprAt =
                                 |> List.head
                                 |> Maybe.andThen identity
                 )
-                (\e cases left ->
+                (\a e cases left ->
                     case left of
                         [] ->
-                            Maybe.map2 CaseStmt (e []) <|
+                            Maybe.map2 (CaseStmtA a) (e []) <|
                                 Helper.sequenceMaybesNonempty
                                     (Nonempty.map ((|>) []) cases)
 
                         idx :: idxs ->
                             (e
                                 ::: Nonempty.map
-                                        ((<<) (Maybe.map (\(Case _ _ rhs) -> rhs)))
+                                        ((<<) (Maybe.map (\(CaseA _ _ rhs) -> rhs)))
                                         cases
                             )
                                 |> Nonempty.map ((|>) idxs)
@@ -181,63 +288,79 @@ exprAt =
                                 |> Maybe.andThen identity
                 )
                 (\c args rhs left ->
-                    Maybe.map (Case c args) (rhs left)
+                    Maybe.map (CaseA c args) (rhs left)
                 )
             )
 
 
-setAt : Indices -> Expr -> Expr -> Expr
-setAt indices val =
+exprAt : Indices -> Expr -> Maybe Expr
+exprAt idxs =
+    toExprA >> exprAtA idxs >> Maybe.map toExpr
+
+
+setAtA : Indices -> ExprA a -> ExprA a -> ExprA a
+setAtA indices val =
     let
-        go : Indices -> Expr -> Expr
+        go : Indices -> ExprA a -> ExprA a
         go idxs e =
             if idxs == indices then
                 val
             else
                 case e of
-                    Var name ->
-                        Var name
+                    VarA a name ->
+                        VarA a name
 
-                    Hole name ->
-                        Hole name
+                    HoleA a name ->
+                        HoleA a name
 
-                    App f args ->
-                        App f <|
+                    AppA a f args ->
+                        AppA a f <|
                             List.indexedMap
                                 (\idx -> go (idxs ++ [ idx ]))
                                 args
 
-                    Lit lit ->
-                        Lit lit
+                    LitA a x ->
+                        LitA a x
 
-                    Constructor name args ->
-                        Constructor name <|
+                    ConstructorA a name args ->
+                        ConstructorA a name <|
                             List.indexedMap
                                 (\idx -> go (idxs ++ [ idx ]))
                                 args
 
-                    CaseStmt e cases ->
-                        CaseStmt (go (idxs ++ [ 0 ]) e) <|
+                    CaseStmtA a e cases ->
+                        CaseStmtA a (go (idxs ++ [ 0 ]) e) <|
                             Nonempty.indexedMap
-                                (\idx (Case c params rhs) ->
-                                    Case c params (go (idxs ++ [ idx + 1 ]) rhs)
+                                (\idx (CaseA c params rhs) ->
+                                    CaseA c params (go (idxs ++ [ idx + 1 ]) rhs)
                                 )
                                 cases
     in
         go []
 
 
+setAt : Indices -> Expr -> Expr -> Expr
+setAt idxs val =
+    toExprA >> setAtA idxs (toExprA val) >> toExpr
+
+
 removeAt : Indices -> Expr -> Expr
 removeAt indices =
     -- [tmp] bogus name
+    -- [todo] remove parameter
     setAt indices (Hole "bogus")
 
 
-updateAt : Indices -> (Expr -> Expr) -> Expr -> Expr
-updateAt indices upd expr =
-    case exprAt indices expr of
+updateAtA : Indices -> (ExprA a -> ExprA a) -> ExprA a -> ExprA a
+updateAtA indices upd expr =
+    case exprAtA indices expr of
         Just e ->
-            setAt indices (upd e) expr
+            setAtA indices (upd e) expr
 
         Nothing ->
             expr
+
+
+updateAt : Indices -> (Expr -> Expr) -> Expr -> Expr
+updateAt idxs upd =
+    toExprA >> updateAtA idxs (toExpr >> upd >> toExprA) >> toExpr
