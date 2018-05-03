@@ -17,15 +17,32 @@ type BlkContent
 
 
 type Def
-    = Def Block Expr
+    = Def (List Name) Expr
 
 
 type alias GetDef a =
-    Name -> (Type -> List BlkContent -> Expr -> a) -> a
+    Name -> (List Name -> Expr -> a) -> a
 
 
-defLhsToExpr : Name -> Block -> Expr
-defLhsToExpr f (Block _ ctnts) =
+typeOfBlock : Block -> Type
+typeOfBlock (Block typ cntnts) =
+    Nonempty typ
+        (List.filterMap
+            (\cntnt ->
+                case cntnt of
+                    BlkHole typ _ ->
+                        Just typ
+
+                    BlkText _ ->
+                        Nothing
+            )
+            cntnts
+        )
+        |> rollToFuncTypes
+
+
+toExpr : Name -> Block -> Expr
+toExpr f (Block _ ctnts) =
     App f <|
         List.filterMap
             (\c ->
@@ -59,24 +76,9 @@ stepCBN getDef expr =
                         App f args
             else
                 getDef f
-                    (\_ ctnts rhs ->
-                        let
-                            vars =
-                                List.filterMap
-                                    (\e ->
-                                        case e of
-                                            BlkHole _ name ->
-                                                Just name
-
-                                            _ ->
-                                                Nothing
-                                    )
-                                    ctnts
-
-                            subs =
-                                List.map2 ((,)) vars args
-                        in
-                            List.foldr (uncurry subst) rhs subs
+                    (\params rhs ->
+                        List.foldr (uncurry subst) rhs <|
+                            List.map2 ((,)) params args
                     )
 
         Lit lit ->
@@ -156,24 +158,9 @@ stepCBV getDef expr =
                         else
                             ( Just idxs
                             , getDef f
-                                (\_ ctnts rhs ->
-                                    let
-                                        vars =
-                                            List.filterMap
-                                                (\e ->
-                                                    case e of
-                                                        BlkHole _ name ->
-                                                            Just name
-
-                                                        _ ->
-                                                            Nothing
-                                                )
-                                                ctnts
-
-                                        subs =
-                                            List.map2 ((,)) vars args_
-                                    in
-                                        List.foldr (uncurry subst) rhs subs
+                                (\params rhs ->
+                                    List.foldr (uncurry subst) rhs <|
+                                        List.map2 ((,)) params args_
                                 )
                             )
 

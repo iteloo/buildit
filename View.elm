@@ -55,7 +55,7 @@ view model =
                                         |> Maybe.andThen (Expr.exprAt idxs)
                                 of
                                     Just e ->
-                                        exprView (mkGetDef model.defs)
+                                        exprView model.blockData
                                             model.hover
                                             Nothing
                                             e
@@ -64,14 +64,14 @@ view model =
                                         div [] []
 
                             LibItem id ->
-                                case Dict.get id model.defs of
+                                case Dict.get id model.blockData of
                                     Nothing ->
                                         div [] []
 
-                                    Just (Def lhs _) ->
+                                    Just block ->
                                         -- [note] the itemId is unnecessary,
                                         -- and may cause unexpected behaviour
-                                        defView id lhs
+                                        blkView id block
 
                             LibLiteral ->
                                 litView
@@ -99,7 +99,7 @@ editView model =
             Just draftExpr ->
                 [ case model.eval of
                     Nothing ->
-                        exprView (mkGetDef model.defs)
+                        exprView model.blockData
                             model.hover
                             (model.dragging
                                 |> Maybe.andThen
@@ -118,7 +118,7 @@ editView model =
                             draftExpr
 
                     Just frames ->
-                        playbackView (mkGetDef model.defs) frames
+                        playbackView model.blockData frames
                 ]
 
 
@@ -144,15 +144,14 @@ libView model =
             <|
                 List.concat
                     [ Dict.values <|
-                        Dict.map
-                            (\id (Def lhs _) -> defView id lhs)
-                            model.defs
+                        Dict.map blkView
+                            model.blockData
                     , [ litView ]
                     ]
         ]
 
 
-defView id (Block typ ctnts) =
+blkView id (Block typ ctnts) =
     blockView "green"
         [ onMouseDown (DragStart (LibItem id))
         ]
@@ -193,12 +192,12 @@ litView =
 
 
 exprView :
-    Block.GetDef (Html Msg)
+    BlockData
     -> Maybe Expr.Indices
     -> Maybe Expr.Indices
     -> Expr
     -> Html Msg
-exprView getDef hoverIdxs dragIdxs =
+exprView bdata hoverIdxs dragIdxs =
     let
         go : Expr.Indices -> Expr -> Html Msg
         go idxs e =
@@ -276,8 +275,8 @@ exprView getDef hoverIdxs dragIdxs =
                                     [ text name ]
 
                             App f args ->
-                                getDef f
-                                    (\typ ctnts _ ->
+                                case getBlock bdata f of
+                                    Block typ cntnts ->
                                         blockView "green"
                                             (List.concat
                                                 [ [ dragStart
@@ -326,9 +325,8 @@ exprView getDef hoverIdxs dragIdxs =
                                                                 )
                                                             )
                                                             ( [], ( args, 0 ) )
-                                                            ctnts
+                                                            cntnts
                                             ]
-                                    )
 
                             Lit lit ->
                                 blockView "orange"
@@ -464,12 +462,12 @@ typeView color typ =
         [ text (TypeInfer.showType typ) ]
 
 
-playbackView : Block.GetDef (Html Msg) -> Zipper EvalFrame -> Html Msg
-playbackView getDef frames =
+playbackView : BlockData -> Zipper EvalFrame -> Html Msg
+playbackView bdata frames =
     div [] <|
         [ -- [hack] stealing dynamic view for now
-          -- [todo] remove getDef once this hack is removed
-          exprView getDef
+          -- [todo] remove bdata once this hack is removed
+          exprView bdata
             Nothing
             Nothing
             (Tuple.first (Zipper.current frames))

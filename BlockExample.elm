@@ -102,6 +102,45 @@ either a b =
 
 
 
+-- EXAMPLE BLOCKS
+
+
+blockData =
+    Dict.fromList
+        [ ( addId, addBlk )
+        , ( add1Id, add1Blk )
+        , ( appendId, appendBlk )
+        ]
+
+
+addBlk =
+    Block int
+        [ BlkHole int "x"
+        , BlkText "+"
+        , BlkHole int "y"
+        ]
+
+
+add1Id =
+    "add1"
+
+
+add1Blk =
+    Block int
+        [ BlkHole int "x"
+        , BlkText "incremented by 1"
+        ]
+
+
+appendBlk =
+    Block (list int)
+        [ BlkHole (list int) "a list"
+        , BlkText "followed by"
+        , BlkHole (list int) "another list"
+        ]
+
+
+
 -- EXAMPLE TYPE DATA
 
 
@@ -139,23 +178,14 @@ defs =
 
 addDef =
     Def
-        (Block int
-            [ BlkHole int "x"
-            , BlkText "+"
-            , BlkHole int "y"
-            ]
-        )
+        [ "x", "y" ]
         -- [hack] bogus value
         (Var "x")
 
 
 add1Def =
     Def
-        (Block int
-            [ BlkHole int "x"
-            , BlkText "incremented by 1"
-            ]
-        )
+        [ "x" ]
         (add (Var "x") (Lit 1))
 
 
@@ -168,12 +198,7 @@ appendDef =
             "another list"
     in
         Def
-            (Block (list int)
-                [ BlkHole (list int) aList
-                , BlkText "followed by"
-                , BlkHole (list int) anotherList
-                ]
-            )
+            [ aList, anotherList ]
             (listCase (Var aList)
                 (Var anotherList)
                 (\x xs -> (cons x (append xs (Var anotherList))))

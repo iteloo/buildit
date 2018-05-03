@@ -122,12 +122,8 @@ update msg model =
                                                 LibItem f ->
                                                     e
                                                         |> Expr.setAt hoverIdxs
-                                                            (mkGetDef model.defs
-                                                                f
-                                                                (\typ ctnts _ ->
-                                                                    Block.defLhsToExpr f
-                                                                        (Block.Block typ ctnts)
-                                                                )
+                                                            (Block.toExpr f
+                                                                (getBlock model.blockData f)
                                                             )
 
                                                 LibLiteral ->
