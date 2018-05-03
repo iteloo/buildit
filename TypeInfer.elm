@@ -129,6 +129,11 @@ map2IE f =
     apIE << mapIE f
 
 
+map3IE : (a -> b -> c -> d) -> IE a -> IE b -> IE c -> IE d
+map3IE f a b c =
+    apIE (map2IE f a b) c
+
+
 unsafePrintEnv : IE ()
 unsafePrintEnv =
     getEnv |> andThenIE (\env -> return (Helper.log [ showEnv env ] ()))
@@ -142,6 +147,18 @@ sequenceIEs =
 sequenceIEsNonempty : Nonempty (IE a) -> IE (Nonempty a)
 sequenceIEsNonempty =
     Helper.nonemptyFoldr (map2IE (:::)) (mapIE Nonempty.fromElement)
+
+
+sequenceIEsExprA : ExprA (IE a) -> IE (ExprA a)
+sequenceIEsExprA =
+    Expr.foldrA
+        (\iea n -> mapIE (flip VarA n) iea)
+        (\iea n -> mapIE (flip HoleA n) iea)
+        (\iea f args -> map2IE (flip AppA f) iea (sequenceIEs args))
+        (\iea x -> mapIE (flip LitA x) iea)
+        (\iea c args -> map2IE (flip ConstructorA c) iea (sequenceIEs args))
+        (\iea e cases -> map3IE CaseStmtA iea e (sequenceIEsNonempty cases))
+        (\c params rhs -> mapIE (CaseA c params) rhs)
 
 
 
@@ -428,6 +445,83 @@ inferFull : TypeData -> Expr -> Result InferenceError Type
 inferFull tData expr =
     infer expr tData emptyEnv
         |> Result.map (uncurry (flip applyConstraints))
+
+
+inferA : Expr -> IE (ExprA Type)
+inferA =
+    let
+        handleApp f args =
+            lookupFreshTypeData f
+                |> andThenIE
+                    (\t ->
+                        let
+                            ( returnType, _ ) =
+                                unrollFuncTypes t
+                        in
+                            Nonempty
+                                (return returnType)
+                                (List.reverse args)
+                                |> sequenceIEsNonempty
+                                |> mapIE rollToFuncTypes
+                                |> andThenIE (setEqual t)
+                                |> andThenIE (\_ -> return returnType)
+                    )
+
+        var n =
+            lookupTypeData n
+
+        hole n =
+            newTVarM
+
+        app =
+            handleApp
+
+        lit _ =
+            return int
+
+        constructor =
+            handleApp
+
+        caseStmt e cases =
+            cases
+                |> sequenceIEsNonempty
+                |> andThenIE
+                    (\cs ->
+                        let
+                            ( patterns, rhss ) =
+                                Nonempty.unzip cs
+                        in
+                            -- first match the matched expr with the patterns
+                            e
+                                |> mapIE (flip (:::) patterns)
+                                |> andThenIE setEqualAll
+                                |> andThenIE
+                                    (-- discard the type,
+                                     -- as long as their types all match
+                                     \_ ->
+                                        -- next match the rhss, returning the (equal) type
+                                        rhss |> setEqualAll
+                                    )
+                    )
+
+        cb c params rhs =
+            lookupFreshTypeData c
+                |> andThenIE
+                    (\t ->
+                        let
+                            ( returnType, paramTypes ) =
+                                unrollFuncTypes t
+                        in
+                            map2IE ((,))
+                                (return returnType)
+                                (rhs
+                                    |> runWithTypeDataExts
+                                        (List.map2 ((,)) params paramTypes)
+                                )
+                    )
+    in
+        Expr.scanr var hole app lit constructor caseStmt cb
+            >> sequenceIEsExprA
 
 
 infer : Expr -> IE Type

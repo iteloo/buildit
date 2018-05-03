@@ -156,6 +156,113 @@ foldr var hole app lit constructor caseStmt caseBranch expr =
                     )
 
 
+scanrA :
+    (a -> Name -> s)
+    -> (a -> Name -> s)
+    -> (a -> Name -> List s -> s)
+    -> (a -> Int -> s)
+    -> (a -> Name -> List s -> s)
+    -> (a -> s -> Nonempty t -> s)
+    -> (Name -> List Name -> s -> t)
+    -> ExprA a
+    -> ExprA s
+scanrA var hole app lit constructor caseStmt caseBranch =
+    foldrA
+        (\a n ->
+            let
+                acc =
+                    var a n
+
+                r =
+                    VarA acc n
+            in
+                ( r, acc )
+        )
+        (\a n ->
+            let
+                acc =
+                    hole a n
+
+                r =
+                    HoleA acc n
+            in
+                ( r, acc )
+        )
+        (\a f sargs ->
+            let
+                acc =
+                    app a f (List.map Tuple.second sargs)
+
+                r =
+                    AppA acc f (List.map Tuple.first sargs)
+            in
+                ( r, acc )
+        )
+        (\a x ->
+            let
+                acc =
+                    lit a x
+
+                r =
+                    LitA acc x
+            in
+                ( r, acc )
+        )
+        (\a c sargs ->
+            let
+                acc =
+                    constructor a c (List.map Tuple.second sargs)
+
+                r =
+                    ConstructorA acc c (List.map Tuple.first sargs)
+            in
+                ( r, acc )
+        )
+        (\a ( e, eacc ) scases ->
+            let
+                acc =
+                    caseStmt a eacc (Nonempty.map Tuple.second scases)
+
+                r =
+                    CaseStmtA acc e (Nonempty.map Tuple.first scases)
+            in
+                ( r, acc )
+        )
+        (\c params ( rhs, acc ) ->
+            let
+                acc_ =
+                    caseBranch c params acc
+
+                r =
+                    CaseA c params rhs
+            in
+                ( r, acc_ )
+        )
+        >> Tuple.first
+
+
+scanr :
+    (Name -> s)
+    -> (Name -> s)
+    -> (Name -> List s -> s)
+    -> (Int -> s)
+    -> (Name -> List s -> s)
+    -> (s -> Nonempty t -> s)
+    -> (Name -> List Name -> s -> t)
+    -> Expr
+    -> ExprA s
+scanr var hole app lit constructor caseStmt caseBranch =
+    toExprA
+        >> scanrA
+            (always var)
+            (always hole)
+            (always app)
+            (always lit)
+            (always constructor)
+            (always caseStmt)
+            caseBranch
+
+
 indexedFoldrA :
     (Indices -> a -> Name -> s)
     -> (Indices -> a -> Name -> s)
