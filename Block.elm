@@ -26,7 +26,7 @@ type alias GetDef a =
 
 typeOfBlock : Block -> Type
 typeOfBlock (Block typ cntnts) =
-    Nonempty typ
+    rollToFuncTypes typ
         (List.filterMap
             (\cntnt ->
                 case cntnt of
@@ -38,7 +38,6 @@ typeOfBlock (Block typ cntnts) =
             )
             cntnts
         )
-        |> rollToFuncTypes
 
 
 toExpr : Name -> Block -> Expr

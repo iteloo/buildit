@@ -442,9 +442,19 @@ setEqualAll =
 
 
 inferFull : TypeData -> Expr -> Result InferenceError Type
-inferFull tData expr =
-    infer expr tData emptyEnv
-        |> Result.map (uncurry (flip applyConstraints))
+inferFull tdata expr =
+    inferAFull tdata expr |> Result.map getA
+
+
+infer : Expr -> IE Type
+infer =
+    inferA >> mapIE getA
+
+
+inferAFull : TypeData -> Expr -> Result InferenceError (ExprA Type)
+inferAFull tdata expr =
+    inferA expr tdata emptyEnv
+        |> Result.map (\( exprA, env ) -> mapA (applyConstraints env) exprA)
 
 
 inferA : Expr -> IE (ExprA Type)
@@ -458,11 +468,8 @@ inferA =
                             ( returnType, _ ) =
                                 unrollFuncTypes t
                         in
-                            Nonempty
-                                (return returnType)
-                                (List.reverse args)
-                                |> sequenceIEsNonempty
-                                |> mapIE rollToFuncTypes
+                            mapIE (rollToFuncTypes returnType)
+                                (args |> sequenceIEs)
                                 |> andThenIE (setEqual t)
                                 |> andThenIE (\_ -> return returnType)
                     )
@@ -470,7 +477,7 @@ inferA =
         var n =
             lookupTypeData n
 
-        hole n =
+        hole _ =
             newTVarM
 
         app =
@@ -484,6 +491,8 @@ inferA =
 
         caseStmt e cases =
             cases
+                -- [note] must sequence the tuples together
+                -- (in the same monadic context)
                 |> sequenceIEsNonempty
                 |> andThenIE
                     (\cs ->
@@ -522,82 +531,6 @@ inferA =
     in
         Expr.scanr var hole app lit constructor caseStmt cb
             >> sequenceIEsExprA
-
-
-infer : Expr -> IE Type
-infer =
-    let
-        handleApp f args =
-            lookupFreshTypeData f
-                |> andThenIE
-                    (\t ->
-                        let
-                            ( returnType, _ ) =
-                                unrollFuncTypes t
-                        in
-                            Nonempty
-                                (return returnType)
-                                (List.reverse args)
-                                |> sequenceIEsNonempty
-                                |> mapIE rollToFuncTypes
-                                |> andThenIE (setEqual t)
-                                |> andThenIE (\_ -> return returnType)
-                    )
-
-        var n =
-            lookupTypeData n
-
-        hole n =
-            newTVarM
-
-        app =
-            handleApp
-
-        lit _ =
-            return int
-
-        constructor =
-            handleApp
-
-        caseStmt e cases =
-            cases
-                |> sequenceIEsNonempty
-                |> andThenIE
-                    (\cs ->
-                        let
-                            ( patterns, rhss ) =
-                                Nonempty.unzip cs
-                        in
-                            -- first match the matched expr with the patterns
-                            e
-                                |> mapIE (flip (:::) patterns)
-                                |> andThenIE setEqualAll
-                                |> andThenIE
-                                    (-- discard the type,
-                                     -- as long as their types all match
-                                     \_ ->
-                                        -- next match the rhss, returning the (equal) type
-                                        rhss |> setEqualAll
-                                    )
-                    )
-
-        cb c params rhs =
-            lookupFreshTypeData c
-                |> andThenIE
-                    (\t ->
-                        let
-                            ( returnType, paramTypes ) =
-                                unrollFuncTypes t
-                        in
-                            map2IE ((,))
-                                (return returnType)
-                                (rhs
-                                    |> runWithTypeDataExts
-                                        (List.map2 ((,)) params paramTypes)
-                                )
-                    )
-    in
-        Expr.foldr var hole app lit constructor caseStmt cb
 
 
 
@@ -690,6 +623,7 @@ unrollFuncTypes =
            )
 
 
-rollToFuncTypes : Nonempty Type -> Type
-rollToFuncTypes =
-    Nonempty.foldl1 (:>)
+rollToFuncTypes : Type -> List Type -> Type
+rollToFuncTypes returnType paramTypes =
+    Nonempty returnType (List.reverse paramTypes)
+        |> Nonempty.foldl1 (:>)

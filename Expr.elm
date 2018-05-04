@@ -61,6 +61,40 @@ toExprA =
         CaseA
 
 
+getA : ExprA a -> a
+getA expr =
+    case expr of
+        VarA a _ ->
+            a
+
+        HoleA a _ ->
+            a
+
+        AppA a _ _ ->
+            a
+
+        LitA a _ ->
+            a
+
+        ConstructorA a _ _ ->
+            a
+
+        CaseStmtA a _ _ ->
+            a
+
+
+mapA : (a -> b) -> ExprA a -> ExprA b
+mapA f =
+    foldrA
+        (f >> VarA)
+        (f >> HoleA)
+        (f >> AppA)
+        (f >> LitA)
+        (f >> ConstructorA)
+        (f >> CaseStmtA)
+        CaseA
+
+
 {-| Case constructor args rhs
 -}
 type CaseA a

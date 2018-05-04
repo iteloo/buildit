@@ -109,6 +109,8 @@ blockData =
     Dict.fromList
         [ ( addId, addBlk )
         , ( add1Id, add1Blk )
+        , ( consId, consBlk )
+        , ( emptyListId, emptyListBlk )
         , ( appendId, appendBlk )
         ]
 
@@ -132,11 +134,24 @@ add1Blk =
         ]
 
 
-appendBlk =
-    Block (list int)
-        [ BlkHole (list int) "a list"
+consBlk =
+    Block (list a)
+        [ BlkHole a "the first element"
         , BlkText "followed by"
-        , BlkHole (list int) "another list"
+        , BlkHole (list a) "the rest of the list"
+        ]
+
+
+emptyListBlk =
+    Block (list a)
+        [ BlkText "The empty list" ]
+
+
+appendBlk =
+    Block (list a)
+        [ BlkHole (list a) "a list"
+        , BlkText "followed by"
+        , BlkHole (list a) "another list"
         ]
 
 

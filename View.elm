@@ -4,14 +4,13 @@ import Msg exposing (..)
 import Model exposing (..)
 import Expr
     exposing
-        ( Expr(..)
-        , Case(..)
+        ( ExprA(..)
+        , CaseA(..)
         )
-import TypeInfer
+import TypeInfer exposing (Type)
 import Block
     exposing
-        ( Def(..)
-        , Block(..)
+        ( Block(..)
         , BlkContent(..)
         )
 import BlockExample
@@ -55,10 +54,22 @@ view model =
                                         |> Maybe.andThen (Expr.exprAt idxs)
                                 of
                                     Just e ->
-                                        exprView model.blockData
-                                            model.hover
-                                            Nothing
-                                            e
+                                        case
+                                            TypeInfer.inferAFull
+                                                (Dict.map
+                                                    (always Block.typeOfBlock)
+                                                    model.blockData
+                                                )
+                                                e
+                                        of
+                                            Ok e ->
+                                                exprView model.blockData
+                                                    model.hover
+                                                    Nothing
+                                                    e
+
+                                            Err err ->
+                                                text (TypeInfer.showErr err)
 
                                     Nothing ->
                                         div [] []
@@ -74,7 +85,7 @@ view model =
                                         blkView id block
 
                             LibLiteral ->
-                                litView
+                                litView TypeInfer.int
                         ]
                 else
                     div [] []
@@ -99,23 +110,34 @@ editView model =
             Just draftExpr ->
                 [ case model.eval of
                     Nothing ->
-                        exprView model.blockData
-                            model.hover
-                            (model.dragging
-                                |> Maybe.andThen
-                                    (\{ itemId, confirmed } ->
-                                        if confirmed then
-                                            case itemId of
-                                                DraftItem idxs ->
-                                                    Just idxs
-
-                                                _ ->
-                                                    Nothing
-                                        else
-                                            Nothing
-                                    )
-                            )
+                        case
                             draftExpr
+                                |> TypeInfer.inferAFull
+                                    (Dict.map (always Block.typeOfBlock)
+                                        model.blockData
+                                    )
+                        of
+                            Ok expr ->
+                                exprView model.blockData
+                                    model.hover
+                                    (model.dragging
+                                        |> Maybe.andThen
+                                            (\{ itemId, confirmed } ->
+                                                if confirmed then
+                                                    case itemId of
+                                                        DraftItem idxs ->
+                                                            Just idxs
+
+                                                        _ ->
+                                                            Nothing
+                                                else
+                                                    Nothing
+                                            )
+                                    )
+                                    expr
+
+                            Err err ->
+                                text (TypeInfer.showErr err)
 
                     Just frames ->
                         playbackView model.blockData frames
@@ -146,48 +168,45 @@ libView model =
                     [ Dict.values <|
                         Dict.map blkView
                             model.blockData
-                    , [ litView ]
+                    , [ litView TypeInfer.int ]
                     ]
         ]
 
 
+blkView : Expr.Name -> Block -> Html Msg
 blkView id (Block typ ctnts) =
     blockView "green"
-        [ onMouseDown (DragStart (LibItem id))
-        ]
-    <|
-        [ typeView "green" typ
-        , div [ style [ ( "padding", "8px" ) ] ] <|
+        typ
+        [ onMouseDown (DragStart (LibItem id)) ]
+        [ div [ style [ ( "padding", "8px" ) ] ] <|
             List.map
                 (\defContent ->
-                    (case defContent of
+                    case defContent of
                         BlkHole typ name ->
                             blockView "grey"
+                                typ
                                 [ style [ ( "border-style", "dashed" ) ] ]
-                                [ typeView "grey" typ
-                                , text name
+                                [ text name
                                 ]
 
                         BlkText txt ->
-                            blockView "white" [] [ text txt ]
-                    )
+                            text txt
                 )
                 ctnts
         ]
 
 
-litView =
+litView : Type -> Html Msg
+litView typ =
     blockView "orange"
+        typ
         [ onMouseDown (DragStart LibLiteral)
         ]
-        [ typeView "orange" TypeInfer.int
-        , div []
-            [ input
-                [ disabled True
-                , value "a number"
-                ]
-                []
+        [ input
+            [ disabled True
+            , value "a number"
             ]
+            []
         ]
 
 
@@ -195,11 +214,11 @@ exprView :
     BlockData
     -> Maybe Expr.Indices
     -> Maybe Expr.Indices
-    -> Expr
+    -> ExprA Type
     -> Html Msg
 exprView bdata hoverIdxs dragIdxs =
     let
-        go : Expr.Indices -> Expr -> Html Msg
+        go : Expr.Indices -> ExprA Type -> Html Msg
         go idxs e =
             let
                 dragStart =
@@ -241,16 +260,18 @@ exprView bdata hoverIdxs dragIdxs =
 
                     _ ->
                         case e of
-                            Var name ->
+                            VarA typ name ->
                                 -- [tofix] no type information passed
                                 blockView "grey"
+                                    typ
                                     (List.concat
                                         [ [ dragStart ], hoverHighlight ]
                                     )
                                     [ text name ]
 
-                            Hole name ->
+                            HoleA typ name ->
                                 blockView "grey"
+                                    typ
                                     (List.concat
                                         [ [ onMouseDown (always HoleMouseDown)
                                           ]
@@ -274,10 +295,11 @@ exprView bdata hoverIdxs dragIdxs =
                                     )
                                     [ text name ]
 
-                            App f args ->
+                            AppA typ f args ->
                                 case getBlock bdata f of
-                                    Block typ cntnts ->
+                                    Block _ cntnts ->
                                         blockView "green"
+                                            typ
                                             (List.concat
                                                 [ [ dragStart
                                                   ]
@@ -285,8 +307,7 @@ exprView bdata hoverIdxs dragIdxs =
                                                 ]
                                             )
                                         <|
-                                            [ typeView "green" typ
-                                            , evalButton
+                                            [ evalButton
                                             , div
                                                 [ style [ ( "padding", "8px" ) ]
                                                 ]
@@ -316,10 +337,7 @@ exprView bdata hoverIdxs dragIdxs =
                                                                                     )
 
                                                                     BlkText txt ->
-                                                                        ( blockView "white"
-                                                                            []
-                                                                            [ text txt ]
-                                                                            :: content
+                                                                        ( text txt :: content
                                                                         , ( args, idx )
                                                                         )
                                                                 )
@@ -328,26 +346,25 @@ exprView bdata hoverIdxs dragIdxs =
                                                             cntnts
                                             ]
 
-                            Lit lit ->
+                            LitA typ lit ->
                                 blockView "orange"
+                                    typ
                                     (List.concat
                                         [ [ dragStart
                                           ]
                                         , hoverHighlight
                                         ]
                                     )
-                                    [ typeView "orange" TypeInfer.int
-                                    , div []
-                                        [ input
-                                            [ value (toString lit)
-                                            , onInput (LitEdit idxs)
-                                            ]
-                                            []
+                                    [ input
+                                        [ value (toString lit)
+                                        , onInput (LitEdit idxs)
                                         ]
+                                        []
                                     ]
 
-                            Constructor c args ->
+                            ConstructorA typ c args ->
                                 blockView "red"
+                                    typ
                                     (List.concat
                                         [ [ dragStart
                                           ]
@@ -372,8 +389,9 @@ exprView bdata hoverIdxs dragIdxs =
                                           ]
                                         ]
 
-                            CaseStmt e cases ->
+                            CaseStmtA typ e cases ->
                                 blockView "blue"
+                                    typ
                                     (List.concat
                                         [ [ dragStart
                                           ]
@@ -399,7 +417,7 @@ exprView bdata hoverIdxs dragIdxs =
                                                                     ]
                                                               ]
                                                             , List.indexedMap
-                                                                (\idx (Case c params rhs) ->
+                                                                (\idx (CaseA c params rhs) ->
                                                                     div []
                                                                         [ text "If it is "
                                                                         , (c :: params)
@@ -435,7 +453,13 @@ holeView color attrs =
         )
 
 
-blockView color attrs =
+blockView :
+    String
+    -> Type
+    -> List (Attribute msg)
+    -> List (Html msg)
+    -> Html msg
+blockView color typ attrs children =
     div
         ([ style
             [ ( "border", "2px solid " ++ color )
@@ -448,15 +472,17 @@ blockView color attrs =
          ]
             ++ attrs
         )
+        [ typeView color typ, div [] children ]
 
 
+typeView : String -> Type -> Html msg
 typeView color typ =
     div
         [ style
             [ ( "display", "inline-block" )
             , ( "vertical-align", "text-top" )
             , ( "background-color", color )
-            , ( "font-size", "x-small" )
+            , ( "font-size", "small" )
             ]
         ]
         [ text (TypeInfer.showType typ) ]
@@ -467,10 +493,20 @@ playbackView bdata frames =
     div [] <|
         [ -- [hack] stealing dynamic view for now
           -- [todo] remove bdata once this hack is removed
-          exprView bdata
-            Nothing
-            Nothing
-            (Tuple.first (Zipper.current frames))
+          case
+            Zipper.current frames
+                |> Tuple.first
+                |> TypeInfer.inferAFull
+                    (Dict.map (always Block.typeOfBlock) bdata)
+          of
+            Ok expr ->
+                exprView bdata
+                    Nothing
+                    Nothing
+                    expr
+
+            Err err ->
+                text (TypeInfer.showErr err)
         , div []
             [ button
                 (case Zipper.previous frames of
