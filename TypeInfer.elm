@@ -3,6 +3,7 @@ module TypeInfer exposing (..)
 import Expr exposing (..)
 import Helper
 import Dict
+import Set
 import List.Nonempty as Nonempty exposing (Nonempty(..), (:::))
 
 
@@ -161,6 +162,138 @@ sequenceIEsExprA =
         (\c params rhs -> mapIE (CaseA c params) rhs)
 
 
+scanrExprAIEs var hole app lit constructor caseStmt caseBranch =
+    toExprA
+        >> scanrA
+            (always var)
+            (always hole)
+            (always app)
+            (always lit)
+            (always constructor)
+            (always caseStmt)
+            caseBranch
+
+
+scanrAExprAIEs :
+    (a -> Name -> IE s)
+    -> (a -> Name -> IE s)
+    -> (a -> Name -> List s -> IE s)
+    -> (a -> Int -> IE s)
+    -> (a -> Name -> List s -> IE s)
+    -> (a -> s -> Nonempty t -> IE s)
+    -> (Name -> List Name -> s -> IE t)
+    -> ExprA a
+    -> IE (ExprA s)
+scanrAExprAIEs var hole app lit constructor caseStmt caseBranch =
+    foldrA
+        (\a n ->
+            var a n
+                |> andThenIE
+                    (\acc ->
+                        return
+                            ( VarA acc n
+                            , acc
+                            )
+                    )
+        )
+        (\a n ->
+            hole a n
+                |> andThenIE
+                    (\acc ->
+                        return
+                            ( HoleA acc n
+                            , acc
+                            )
+                    )
+        )
+        (\a f sargs ->
+            sargs
+                |> sequenceIEs
+                |> andThenIE
+                    (\args ->
+                        let
+                            ( argsVal, argsAcc ) =
+                                List.unzip args
+                        in
+                            app a f argsAcc
+                                |> andThenIE
+                                    (\acc ->
+                                        return
+                                            ( AppA acc f argsVal
+                                            , acc
+                                            )
+                                    )
+                    )
+        )
+        (\a x ->
+            lit a x
+                |> andThenIE
+                    (\acc ->
+                        return
+                            ( LitA acc x
+                            , acc
+                            )
+                    )
+        )
+        (\a c sargs ->
+            sargs
+                |> sequenceIEs
+                |> andThenIE
+                    (\args ->
+                        let
+                            ( argsVal, argsAcc ) =
+                                List.unzip args
+                        in
+                            constructor a c argsAcc
+                                |> andThenIE
+                                    (\acc ->
+                                        return
+                                            ( ConstructorA acc c argsVal
+                                            , acc
+                                            )
+                                    )
+                    )
+        )
+        (\a se scases ->
+            scases
+                |> sequenceIEsNonempty
+                |> andThenIE
+                    (\cases ->
+                        let
+                            ( casesVal, casesAcc ) =
+                                Nonempty.unzip cases
+                        in
+                            se
+                                |> andThenIE
+                                    (\( e, eAcc ) ->
+                                        caseStmt a eAcc casesAcc
+                                            |> andThenIE
+                                                (\acc ->
+                                                    return
+                                                        ( CaseStmtA acc e casesVal
+                                                        , acc
+                                                        )
+                                                )
+                                    )
+                    )
+        )
+        (\c params srhs ->
+            srhs
+                |> andThenIE
+                    (\( rhs, rhsAcc ) ->
+                        caseBranch c params rhsAcc
+                            |> andThenIE
+                                (\acc ->
+                                    return
+                                        ( CaseA c params rhs
+                                        , acc
+                                        )
+                                )
+                    )
+        )
+        >> mapIE Tuple.first
+
+
 
 -- TYPE DATA OPERATIONS
 
@@ -200,28 +333,32 @@ runWithTypeDataExts =
 
 
 
--- BASIC INFERNECE OPERATIONS
+-- BASIC INFERENCE OPERATIONS
 
 
 applyConstraints : TVarEnv -> Type -> Type
 applyConstraints env typ =
-    case typ of
-        TypeVar a ->
-            case lookupTVar env a of
-                Just val ->
-                    val
+    let
+        go =
+            applyConstraints env
+    in
+        case typ of
+            TypeVar a ->
+                case lookupTVar env a of
+                    Just val ->
+                        go val
 
-                Nothing ->
-                    TypeVar a
+                    Nothing ->
+                        TypeVar a
 
-        BaseType n ->
-            BaseType n
+            BaseType n ->
+                BaseType n
 
-        FuncType t1 t2 ->
-            FuncType (applyConstraints env t1) (applyConstraints env t2)
+            FuncType t1 t2 ->
+                FuncType (go t1) (go t2)
 
-        ParamType f typs ->
-            ParamType f (List.map (applyConstraints env) typs)
+            ParamType f typs ->
+                ParamType f (List.map go typs)
 
 
 applyConstraintsM : Type -> IE Type
@@ -229,52 +366,70 @@ applyConstraintsM typ =
     getEnv |> andThenIE (\env -> return (applyConstraints env typ))
 
 
-allTVars : Type -> List TVarName
+allTVars : Type -> Set.Set TVarName
 allTVars =
     let
-        go : List TVarName -> Type -> List TVarName
+        go : Set.Set TVarName -> Type -> Set.Set TVarName
         go tvars t =
             case t of
                 TypeVar n ->
-                    n :: tvars
+                    Set.insert n tvars
 
                 BaseType _ ->
                     tvars
 
                 FuncType ta tb ->
-                    go tvars ta ++ go tvars tb
+                    Set.union (go tvars ta) (go tvars tb)
 
                 ParamType _ typs ->
-                    List.concatMap (go tvars) typs
+                    List.map (go tvars) typs
+                        |> List.foldr Set.union Set.empty
     in
-        go []
+        go Set.empty
 
 
 rewriteWithFreshTVars : Type -> IE Type
 rewriteWithFreshTVars t =
-    allTVars t
-        |> List.map
-            (\n ->
-                newTVarM
-                    |> andThenIE
-                        (\new ->
-                            return ( n, new )
-                        )
-            )
-        |> sequenceIEs
-        |> andThenIE
-            (\subs ->
-                return
-                    (applyConstraints
-                        (TVarEnv
-                            (-- [hack] bogus value
-                             0
+    let
+        rename : Dict.Dict TVarName Type -> Type -> Type
+        rename sub typ =
+            let
+                go =
+                    rename sub
+            in
+                case typ of
+                    TypeVar n ->
+                        case Dict.get n sub of
+                            Just val ->
+                                val
+
+                            Nothing ->
+                                TypeVar n
+
+                    BaseType n ->
+                        BaseType n
+
+                    FuncType t1 t2 ->
+                        FuncType (go t1) (go t2)
+
+                    ParamType f typs ->
+                        ParamType f (List.map go typs)
+    in
+        allTVars t
+            |> Set.toList
+            |> List.map
+                (\n ->
+                    newTVarM
+                        |> andThenIE
+                            (\new ->
+                                return ( n, new )
                             )
-                            (Dict.fromList subs)
-                        )
-                        t
-                    )
-            )
+                )
+            |> sequenceIEs
+            |> andThenIE
+                (\subs ->
+                    return (rename (Dict.fromList subs) t)
+                )
 
 
 {-| match the typevars in the two type expressions, and
@@ -288,11 +443,11 @@ setEqual t1 t2 =
         go t1 t2 =
             case ( t1, t2 ) of
                 -- Assumes TypeVar n is free
-                ( TypeVar n, t ) ->
+                ( t, TypeVar n ) ->
                     setEqualTVar n t
 
                 -- Assumes TypeVar n is free
-                ( t, TypeVar n ) ->
+                ( TypeVar n, t ) ->
                     setEqualTVar n t
 
                 ( BaseType n1, BaseType n2 ) ->
@@ -460,7 +615,7 @@ inferAFull tdata expr =
 inferA : Expr -> IE (ExprA Type)
 inferA =
     let
-        handleApp f args =
+        handleApp constr f args =
             lookupFreshTypeData f
                 |> andThenIE
                     (\t ->
@@ -468,28 +623,53 @@ inferA =
                             ( returnType, _ ) =
                                 unrollFuncTypes t
                         in
-                            mapIE (rollToFuncTypes returnType)
-                                (args |> sequenceIEs)
-                                |> andThenIE (setEqual t)
-                                |> andThenIE (\_ -> return returnType)
+                            args
+                                |> sequenceIEs
+                                |> andThenIE
+                                    (\argExprs ->
+                                        let
+                                            argTypes =
+                                                List.map getA argExprs
+                                        in
+                                            rollToFuncTypes returnType argTypes
+                                                |> setEqual t
+                                                |> andThenIE
+                                                    (\_ ->
+                                                        return (constr returnType f argExprs)
+                                                    )
+                                    )
                     )
 
+        var : Name -> IE (ExprA Type)
         var n =
             lookupTypeData n
+                |> andThenIE (\t -> return (VarA t n))
 
-        hole _ =
+        hole n =
             newTVarM
+                |> andThenIE (\t -> return (HoleA t n))
 
         app =
-            handleApp
+            handleApp AppA
 
-        lit _ =
-            return int
+        lit x =
+            return (LitA int x)
 
         constructor =
-            handleApp
+            handleApp ConstructorA
 
-        caseStmt e cases =
+        caseStmt :
+            IE (ExprA Type)
+            ->
+                Nonempty
+                    (IE
+                        { caseExpr : CaseA Type
+                        , lhsType : Type
+                        , rhsType : Type
+                        }
+                    )
+            -> IE (ExprA Type)
+        caseStmt me cases =
             cases
                 -- [note] must sequence the tuples together
                 -- (in the same monadic context)
@@ -497,19 +677,36 @@ inferA =
                 |> andThenIE
                     (\cs ->
                         let
-                            ( patterns, rhss ) =
-                                Nonempty.unzip cs
+                            caseExprs : Nonempty (CaseA Type)
+                            caseExprs =
+                                Nonempty.map .caseExpr cs
+
+                            lhsTypes : Nonempty Type
+                            lhsTypes =
+                                Nonempty.map .lhsType cs
+
+                            rhsTypes : Nonempty Type
+                            rhsTypes =
+                                Nonempty.map .rhsType cs
                         in
                             -- first match the matched expr with the patterns
-                            e
-                                |> mapIE (flip (:::) patterns)
-                                |> andThenIE setEqualAll
+                            me
                                 |> andThenIE
-                                    (-- discard the type,
-                                     -- as long as their types all match
-                                     \_ ->
-                                        -- next match the rhss, returning the (equal) type
-                                        rhss |> setEqualAll
+                                    (\e ->
+                                        (getA e ::: lhsTypes)
+                                            |> setEqualAll
+                                            |> andThenIE
+                                                (-- discard the type,
+                                                 -- as long as their types all match
+                                                 \_ ->
+                                                    -- next match the rhss, returning the (equal) type
+                                                    rhsTypes
+                                                        |> setEqualAll
+                                                        |> andThenIE
+                                                            (\rhsType ->
+                                                                return (CaseStmtA rhsType e caseExprs)
+                                                            )
+                                                )
                                     )
                     )
 
@@ -521,16 +718,20 @@ inferA =
                             ( returnType, paramTypes ) =
                                 unrollFuncTypes t
                         in
-                            map2IE ((,))
-                                (return returnType)
-                                (rhs
-                                    |> runWithTypeDataExts
-                                        (List.map2 ((,)) params paramTypes)
-                                )
+                            rhs
+                                |> runWithTypeDataExts
+                                    (List.map2 ((,)) params paramTypes)
+                                |> andThenIE
+                                    (\rhsA ->
+                                        return
+                                            { caseExpr = CaseA c params rhsA
+                                            , lhsType = returnType
+                                            , rhsType = getA rhsA
+                                            }
+                                    )
                     )
     in
-        Expr.scanr var hole app lit constructor caseStmt cb
-            >> sequenceIEsExprA
+        Expr.foldr var hole app lit constructor caseStmt cb
 
 
 
@@ -558,7 +759,7 @@ showEnv (TVarEnv n dict) =
     Helper.unwords
         [ "{"
         , dict
-            |> Dict.map (\n t -> showType (TypeVar n) ++ ":" ++ showType t)
+            |> Dict.map (\n t -> showType (TypeVar n) ++ "->" ++ showType t)
             |> Dict.values
             |> List.intersperse ","
             |> Helper.unwords

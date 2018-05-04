@@ -229,6 +229,11 @@ listExprFromListOfInt =
     List.foldr cons emptyList << List.map Lit
 
 
+listWithHole : Expr
+listWithHole =
+    cons (Hole "hole") (Hole "hole")
+
+
 range02 : Expr
 range02 =
     listExprFromListOfInt (List.range 0 2)

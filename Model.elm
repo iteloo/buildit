@@ -57,7 +57,7 @@ init =
     , blockData = BlockExample.blockData
     , defs = BlockExample.defs
     , -- [tmp] hard-coded
-      draftExpr = Just BlockExample.range56
+      draftExpr = Just BlockExample.listWithHole
     , eval = Nothing
     }
 
