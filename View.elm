@@ -221,14 +221,17 @@ exprView bdata hoverIdxs dragIdxs =
         go : Expr.Indices -> ExprA Type -> Html Msg
         go idxs e =
             let
+                -- [note] used in everything but holes
                 dragStart =
                     onMouseDown (DragStart (DraftItem idxs))
 
+                -- [note] used only in holes and tmp holes (when dragging)
                 hover =
                     [ onMouseEnter (MouseOver idxs)
                     , onMouseLeave (MouseLeave idxs)
                     ]
 
+                -- [note] used in all
                 hoverHighlight =
                     case Maybe.map ((==) idxs) hoverIdxs of
                         Just True ->
@@ -240,6 +243,7 @@ exprView bdata hoverIdxs dragIdxs =
                         _ ->
                             []
 
+                -- [note] used in app and caseStmt
                 evalButton =
                     button [ onClick (Reduce idxs) ]
                         [ text "Evaluate" ]
@@ -320,7 +324,7 @@ exprView bdata hoverIdxs dragIdxs =
                                     )
                                     [ text name ]
 
-                            HoleA typ name ->
+                            HoleA typ ->
                                 blockView "grey"
                                     typ
                                     (List.concat
@@ -344,7 +348,7 @@ exprView bdata hoverIdxs dragIdxs =
                                                 []
                                         ]
                                     )
-                                    [ text name ]
+                                    []
 
                             AppA typ f args ->
                                 handleApp typ f args

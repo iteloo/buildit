@@ -46,8 +46,8 @@ toExpr f (Block _ ctnts) =
         List.filterMap
             (\c ->
                 case c of
-                    BlkHole _ name ->
-                        Just (Hole name)
+                    BlkHole _ _ ->
+                        Just Hole
 
                     BlkText _ ->
                         Nothing
@@ -61,8 +61,8 @@ stepCBN getDef expr =
         Var name ->
             Var name
 
-        Hole name ->
-            Hole name
+        Hole ->
+            Hole
 
         App f args ->
             -- [hack] pick out basic operations
@@ -128,8 +128,8 @@ stepCBV getDef expr =
         var _ name =
             ( Nothing, Var name )
 
-        hole _ name =
-            ( Nothing, Hole name )
+        hole _ =
+            ( Nothing, Hole )
 
         app idxs f args =
             let
@@ -248,8 +248,8 @@ subst var val expr =
                 else
                     Var name
 
-            Hole name ->
-                Hole name
+            Hole ->
+                Hole
 
             App id exprs ->
                 -- [tofix] capture

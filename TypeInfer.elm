@@ -169,7 +169,7 @@ sequenceIEsExprA : ExprA (IE a) -> IE (ExprA a)
 sequenceIEsExprA =
     Expr.foldrA
         (\iea n -> mapIE (flip VarA n) iea)
-        (\iea n -> mapIE (flip HoleA n) iea)
+        (\iea -> mapIE HoleA iea)
         (\iea f args -> map2IE (flip AppA f) iea (sequenceIEs args))
         (\iea x -> mapIE (flip LitA x) iea)
         (\iea c args -> map2IE (flip ConstructorA c) iea (sequenceIEs args))
@@ -191,7 +191,7 @@ scanrExprAIEs var hole app lit constructor caseStmt caseBranch =
 
 scanrAExprAIEs :
     (a -> Name -> IE s)
-    -> (a -> Name -> IE s)
+    -> (a -> IE s)
     -> (a -> Name -> List s -> IE s)
     -> (a -> Int -> IE s)
     -> (a -> Name -> List s -> IE s)
@@ -211,12 +211,12 @@ scanrAExprAIEs var hole app lit constructor caseStmt caseBranch =
                             )
                     )
         )
-        (\a n ->
-            hole a n
+        (\a ->
+            hole a
                 |> andThenIE
                     (\acc ->
                         return
-                            ( HoleA acc n
+                            ( HoleA acc
                             , acc
                             )
                     )
@@ -648,9 +648,9 @@ inferA =
                                         in
                                             rollToFuncTypes returnType argTypes
                                                 |> setEqual t
-                                                |> andThenIE
+                                                |> mapIE
                                                     (\_ ->
-                                                        return (constr returnType f argExprs)
+                                                        constr returnType f argExprs
                                                     )
                                     )
                     )
@@ -658,11 +658,11 @@ inferA =
         var : Name -> IE (ExprA Type)
         var n =
             lookupTypeData n
-                |> andThenIE (\t -> return (VarA t n))
+                |> mapIE (\t -> VarA t n)
 
-        hole n =
+        hole =
             newTVarM
-                |> andThenIE (\t -> return (HoleA t n))
+                |> mapIE (\t -> HoleA t)
 
         app =
             handleApp AppA
@@ -717,9 +717,9 @@ inferA =
                                                     -- next match the rhss, returning the (equal) type
                                                     rhsTypes
                                                         |> setEqualAll
-                                                        |> andThenIE
+                                                        |> mapIE
                                                             (\rhsType ->
-                                                                return (CaseStmtA rhsType e caseExprs)
+                                                                CaseStmtA rhsType e caseExprs
                                                             )
                                                 )
                                     )
@@ -736,13 +736,12 @@ inferA =
                             rhs
                                 |> runWithTypeDataExts
                                     (List.map2 ((,)) params paramTypes)
-                                |> andThenIE
+                                |> mapIE
                                     (\rhsA ->
-                                        return
-                                            { caseExpr = CaseA c params rhsA
-                                            , lhsType = returnType
-                                            , rhsType = getA rhsA
-                                            }
+                                        { caseExpr = CaseA c params rhsA
+                                        , lhsType = returnType
+                                        , rhsType = getA rhsA
+                                        }
                                     )
                     )
     in

@@ -13,7 +13,7 @@ type alias Name =
 
 type Expr
     = Var Name
-    | Hole Name
+    | Hole
     | App Name (List Expr)
     | Lit Int
     | Constructor Name (List Expr)
@@ -30,7 +30,7 @@ type Case
 
 type ExprA a
     = VarA a Name
-    | HoleA a Name
+    | HoleA a
     | AppA a Name (List (ExprA a))
     | LitA a Int
     | ConstructorA a Name (List (ExprA a))
@@ -67,7 +67,7 @@ getA expr =
         VarA a _ ->
             a
 
-        HoleA a _ ->
+        HoleA a ->
             a
 
         AppA a _ _ ->
@@ -111,7 +111,7 @@ type alias Indices =
 
 foldrA :
     (a -> Name -> s)
-    -> (a -> Name -> s)
+    -> (a -> s)
     -> (a -> Name -> List s -> s)
     -> (a -> Int -> s)
     -> (a -> Name -> List s -> s)
@@ -128,8 +128,8 @@ foldrA var hole app lit constructor caseStmt caseBranch e =
             VarA a name ->
                 var a name
 
-            HoleA a name ->
-                hole a name
+            HoleA a ->
+                hole a
 
             AppA a f args ->
                 app a f (List.map go args)
@@ -151,7 +151,7 @@ foldrA var hole app lit constructor caseStmt caseBranch e =
 
 foldr :
     (Name -> s)
-    -> (Name -> s)
+    -> s
     -> (Name -> List s -> s)
     -> (Int -> s)
     -> (Name -> List s -> s)
@@ -169,8 +169,8 @@ foldr var hole app lit constructor caseStmt caseBranch expr =
             Var name ->
                 var name
 
-            Hole name ->
-                hole name
+            Hole ->
+                hole
 
             App f args ->
                 app f (List.map go args)
@@ -192,7 +192,7 @@ foldr var hole app lit constructor caseStmt caseBranch expr =
 
 scanrA :
     (a -> Name -> s)
-    -> (a -> Name -> s)
+    -> (a -> s)
     -> (a -> Name -> List s -> s)
     -> (a -> Int -> s)
     -> (a -> Name -> List s -> s)
@@ -212,13 +212,13 @@ scanrA var hole app lit constructor caseStmt caseBranch =
             in
                 ( r, acc )
         )
-        (\a n ->
+        (\a ->
             let
                 acc =
-                    hole a n
+                    hole a
 
                 r =
-                    HoleA acc n
+                    HoleA acc
             in
                 ( r, acc )
         )
@@ -277,7 +277,7 @@ scanrA var hole app lit constructor caseStmt caseBranch =
 
 scanr :
     (Name -> s)
-    -> (Name -> s)
+    -> s
     -> (Name -> List s -> s)
     -> (Int -> s)
     -> (Name -> List s -> s)
@@ -299,7 +299,7 @@ scanr var hole app lit constructor caseStmt caseBranch =
 
 indexedFoldrA :
     (Indices -> a -> Name -> s)
-    -> (Indices -> a -> Name -> s)
+    -> (Indices -> a -> s)
     -> (Indices -> a -> Name -> List s -> s)
     -> (Indices -> a -> Int -> s)
     -> (Indices -> a -> Name -> List s -> s)
@@ -311,7 +311,7 @@ indexedFoldrA var hole app lit constructor caseStmt caseBranch =
     flip
         (foldrA
             (\a name idxs -> var idxs a name)
-            (\a name idxs -> hole idxs a name)
+            (\a idxs -> hole idxs a)
             (\a f args idxs ->
                 app idxs
                     a
@@ -347,7 +347,7 @@ indexedFoldrA var hole app lit constructor caseStmt caseBranch =
 
 indexedFoldr :
     (Indices -> Name -> s)
-    -> (Indices -> Name -> s)
+    -> (Indices -> s)
     -> (Indices -> Name -> List s -> s)
     -> (Indices -> Int -> s)
     -> (Indices -> Name -> List s -> s)
@@ -381,7 +381,7 @@ exprAtA =
         flip
             (foldrA
                 (\a n -> end <| VarA a n)
-                (\a n -> end <| HoleA a n)
+                (\a -> end <| HoleA a)
                 (\a f args left ->
                     case left of
                         [] ->
@@ -451,8 +451,8 @@ setAtA indices val =
                     VarA a name ->
                         VarA a name
 
-                    HoleA a name ->
-                        HoleA a name
+                    HoleA a ->
+                        HoleA a
 
                     AppA a f args ->
                         AppA a f <|
@@ -487,9 +487,7 @@ setAt idxs val =
 
 removeAt : Indices -> Expr -> Expr
 removeAt indices =
-    -- [tmp] bogus name
-    -- [todo] remove parameter
-    setAt indices (Hole "bogus")
+    setAt indices Hole
 
 
 updateAtA : Indices -> (ExprA a -> ExprA a) -> ExprA a -> ExprA a

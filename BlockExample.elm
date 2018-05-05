@@ -231,7 +231,7 @@ listExprFromListOfInt =
 
 listWithHole : Expr
 listWithHole =
-    cons (Hole "hole") (Hole "hole")
+    cons Hole Hole
 
 
 range02 : Expr
@@ -245,7 +245,7 @@ range56 =
 
 addHole : Expr
 addHole =
-    add (Lit 1) (Hole "y")
+    add (Lit 1) Hole
 
 
 add23 : Expr
