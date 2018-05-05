@@ -8,7 +8,12 @@ import List.Nonempty as Nonempty exposing (Nonempty(..), (:::))
 
 
 type Block
-    = Block Type (List BlkContent)
+    = Block BlockType Type (List BlkContent)
+
+
+type BlockType
+    = ConstructorBlockType
+    | FunctionBlockType
 
 
 type BlkContent
@@ -25,7 +30,7 @@ type alias GetDef a =
 
 
 typeOfBlock : Block -> Type
-typeOfBlock (Block typ cntnts) =
+typeOfBlock (Block _ typ cntnts) =
     rollToFuncTypes typ
         (List.filterMap
             (\cntnt ->
@@ -41,18 +46,27 @@ typeOfBlock (Block typ cntnts) =
 
 
 toExpr : Name -> Block -> Expr
-toExpr f (Block _ ctnts) =
-    App f <|
-        List.filterMap
-            (\c ->
-                case c of
-                    BlkHole _ _ ->
-                        Just Hole
+toExpr f (Block blkType _ ctnts) =
+    let
+        app =
+            case blkType of
+                ConstructorBlockType ->
+                    Constructor
 
-                    BlkText _ ->
-                        Nothing
-            )
-            ctnts
+                FunctionBlockType ->
+                    App
+    in
+        app f <|
+            List.filterMap
+                (\c ->
+                    case c of
+                        BlkHole _ _ ->
+                            Just Hole
+
+                        BlkText _ ->
+                            Nothing
+                )
+                ctnts
 
 
 stepCBN : GetDef Expr -> Expr -> Expr

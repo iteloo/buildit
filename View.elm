@@ -174,8 +174,15 @@ libView model =
 
 
 blkView : Expr.Name -> Block -> Html Msg
-blkView id (Block typ ctnts) =
-    blockView "green"
+blkView id (Block blkType typ ctnts) =
+    blockView
+        (case blkType of
+            Block.FunctionBlockType ->
+                "green"
+
+            Block.ConstructorBlockType ->
+                "red"
+        )
         typ
         [ onMouseDown (DragStart (LibItem id)) ]
         [ div [ style [ ( "padding", "8px" ) ] ] <|
@@ -250,54 +257,68 @@ exprView bdata hoverIdxs dragIdxs =
 
                 handleApp typ f args =
                     case getBlock bdata f of
-                        Block _ cntnts ->
-                            blockView "green"
-                                typ
-                                (List.concat
-                                    [ [ dragStart
-                                      ]
-                                    , hoverHighlight
-                                    ]
-                                )
-                            <|
-                                [ evalButton
-                                , div
-                                    [ style [ ( "padding", "8px" ) ]
-                                    ]
-                                  <|
-                                    List.reverse <|
-                                        Tuple.first <|
-                                            List.foldl
-                                                (\blkContent ( content, ( args, idx ) ) ->
-                                                    (case blkContent of
-                                                        BlkHole _ _ ->
-                                                            case args of
-                                                                arg :: ags ->
-                                                                    ( holeView "green"
-                                                                        []
-                                                                        [ go
-                                                                            (idxs ++ [ idx ])
-                                                                            arg
-                                                                        ]
-                                                                        :: content
-                                                                    , ( ags, idx + 1 )
-                                                                    )
+                        Block blkType _ cntnts ->
+                            let
+                                color =
+                                    case blkType of
+                                        Block.FunctionBlockType ->
+                                            "green"
 
-                                                                [] ->
-                                                                    Debug.crash
-                                                                        ("evaluation error."
-                                                                            ++ "Not enough arguments"
+                                        Block.ConstructorBlockType ->
+                                            "red"
+                            in
+                                blockView color
+                                    typ
+                                    (List.concat
+                                        [ [ dragStart
+                                          ]
+                                        , hoverHighlight
+                                        ]
+                                    )
+                                <|
+                                    [ case blkType of
+                                        Block.FunctionBlockType ->
+                                            evalButton
+
+                                        Block.ConstructorBlockType ->
+                                            text ""
+                                    , div
+                                        [ style [ ( "padding", "8px" ) ]
+                                        ]
+                                      <|
+                                        List.reverse <|
+                                            Tuple.first <|
+                                                List.foldl
+                                                    (\blkContent ( content, ( args, idx ) ) ->
+                                                        (case blkContent of
+                                                            BlkHole _ _ ->
+                                                                case args of
+                                                                    arg :: ags ->
+                                                                        ( holeView color
+                                                                            []
+                                                                            [ go
+                                                                                (idxs ++ [ idx ])
+                                                                                arg
+                                                                            ]
+                                                                            :: content
+                                                                        , ( ags, idx + 1 )
                                                                         )
 
-                                                        BlkText txt ->
-                                                            ( text txt :: content
-                                                            , ( args, idx )
-                                                            )
+                                                                    [] ->
+                                                                        Debug.crash
+                                                                            ("evaluation error."
+                                                                                ++ "Not enough arguments"
+                                                                            )
+
+                                                            BlkText txt ->
+                                                                ( text txt :: content
+                                                                , ( args, idx )
+                                                                )
+                                                        )
                                                     )
-                                                )
-                                                ( [], ( args, 0 ) )
-                                                cntnts
-                                ]
+                                                    ( [], ( args, 0 ) )
+                                                    cntnts
+                                    ]
             in
                 case Maybe.map ((==) idxs) dragIdxs of
                     Just True ->

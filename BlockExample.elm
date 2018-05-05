@@ -116,7 +116,8 @@ blockData =
 
 
 addBlk =
-    Block int
+    Block FunctionBlockType
+        int
         [ BlkHole int "x"
         , BlkText "+"
         , BlkHole int "y"
@@ -128,14 +129,16 @@ add1Id =
 
 
 add1Blk =
-    Block int
+    Block FunctionBlockType
+        int
         [ BlkHole int "x"
         , BlkText "incremented by 1"
         ]
 
 
 consBlk =
-    Block (list a)
+    Block ConstructorBlockType
+        (list a)
         [ BlkHole a "the first element"
         , BlkText "followed by"
         , BlkHole (list a) "the rest of the list"
@@ -143,12 +146,14 @@ consBlk =
 
 
 emptyListBlk =
-    Block (list a)
+    Block ConstructorBlockType
+        (list a)
         [ BlkText "The empty list" ]
 
 
 appendBlk =
-    Block (list a)
+    Block FunctionBlockType
+        (list a)
         [ BlkHole (list a) "a list"
         , BlkText "followed by"
         , BlkHole (list a) "another list"
@@ -241,6 +246,10 @@ range02 =
 
 range56 =
     listExprFromListOfInt (List.range 5 6)
+
+
+listEvalEx =
+    append range56 range02
 
 
 addHole : Expr

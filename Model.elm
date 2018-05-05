@@ -57,7 +57,7 @@ init =
     , blockData = BlockExample.blockData
     , defs = BlockExample.defs
     , -- [tmp] hard-coded
-      draftExpr = Just BlockExample.listWithHole
+      draftExpr = Just BlockExample.listEvalEx
     , eval = Nothing
     }
 
