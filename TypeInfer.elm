@@ -115,24 +115,39 @@ batchIE mma =
     mma |> andThenIE identity
 
 
+pure : a -> IE a
+pure =
+    return
+
+
 apIE : IE (a -> b) -> IE a -> IE b
 apIE mf ma =
     mf |> andThenIE (\f -> ma |> andThenIE (f >> return))
 
 
+infixl 4 <*>
+(<*>) =
+    apIE
+
+
+infixl 4 <$>
+(<$>) f a =
+    pure f <*> a
+
+
 mapIE : (a -> b) -> IE a -> IE b
-mapIE f =
-    andThenIE (return << f)
+mapIE f a =
+    f <$> a
 
 
 map2IE : (a -> b -> c) -> IE a -> IE b -> IE c
-map2IE f =
-    apIE << mapIE f
+map2IE f a b =
+    f <$> a <*> b
 
 
 map3IE : (a -> b -> c -> d) -> IE a -> IE b -> IE c -> IE d
 map3IE f a b c =
-    apIE (map2IE f a b) c
+    f <$> a <*> b <*> c
 
 
 unsafePrintEnv : IE ()
@@ -142,7 +157,7 @@ unsafePrintEnv =
 
 sequenceIEs : List (IE a) -> IE (List a)
 sequenceIEs =
-    List.foldr (map2IE (::)) (return [])
+    List.foldr (map2IE (::)) (pure [])
 
 
 sequenceIEsNonempty : Nonempty (IE a) -> IE (Nonempty a)
